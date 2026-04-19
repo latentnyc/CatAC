@@ -352,7 +352,11 @@ function renderParty() {
         const hood = suggestedHoodForCat(cat);
         const partners = bondPartners(cat.id);
         const partnerNames = partners.map(pid => findCat(pid)?.name).filter(Boolean);
-        const hoodHtml = hood ? `Best fit: <span>${hood.icon} ${escapeHtml(hood.name)}</span>` : "";
+        // Title explains the suggestion mechanism so players know it's based on their stats.
+        const hoodTip = hood
+          ? `This cat's two best stats match ${hood.name} (${hood.primaryChecks.map(s => STAT_LABELS[s]).join(" / ")}). Hood missions tend to go well.`
+          : "";
+        const hoodHtml = hood ? `<span title="${escapeHtml(hoodTip)}">Best fit: <span>${hood.icon} ${escapeHtml(hood.name)}</span></span>` : "";
         const bondHtml = partnerNames.length
           ? `<span class="cat-bond-indicator" title="Bonded with: ${escapeHtml(partnerNames.join(", "))}. Pair them in a party for +${BOND_SCORE_BONUS} score, +${Math.round(BOND_LOOT_PCT_BONUS * 100)}% loot.">\u{1F49E} ${partnerNames.length}</span>`
           : "";
@@ -514,7 +518,7 @@ function renderTalentModal() {
         <div class="talent-name">${badge} ${escapeHtml(node.name)}</div>
         <div class="talent-desc muted">${escapeHtml(node.desc)}</div>
       </div>
-      ${available ? `<button class="talent-pick-btn" data-talent-pick="${node.id}">Pick</button>` : ""}
+      ${available ? `<button class="talent-pick-btn" data-talent-pick="${node.id}" title="${escapeHtml(node.desc)}">Pick</button>` : ""}
     </div>`;
   }).join("");
 
@@ -564,7 +568,9 @@ function renderNeighborhoodTabs() {
   host.innerHTML = visibleIds.map(id => {
     const n = NEIGHBORHOODS[id];
     const active = uiState.activeNeighborhood === id ? "active" : "";
-    return `<button class="hood-tab ${active}" data-hood-id="${id}" style="--hood-color: ${n.color}">
+    const checks = n.primaryChecks.map(s => STAT_LABELS[s]).join(" / ");
+    const tip = `${n.name} \u2014 ${n.element} \u00B7 Check: ${checks}\n${n.flavor}`;
+    return `<button class="hood-tab ${active}" data-hood-id="${id}" style="--hood-color: ${n.color}" title="${escapeHtml(tip)}">
       <span class="hood-icon">${n.icon}</span>
       <span class="hood-name">${n.name}</span>
     </button>`;
@@ -591,7 +597,7 @@ function renderMissions() {
         <div class="mission-stats">
           <span class="muted">Spend \uD83C\uDF80 to design a one-shot mission with stacked modifiers.</span>
         </div>
-        <button class="mission-send commission-send" data-commission-open="${hood.id}">Design</button>
+        <button class="mission-send commission-send" data-commission-open="${hood.id}" title="Spend treaties to commission a one-shot mission with stacked bonuses: Fortune, Jackpot, Prestige, etc.">Design</button>
       </div>`;
     host.appendChild(card);
   }
@@ -612,7 +618,7 @@ function renderMissions() {
           <span>Party ${partyMax()} required</span>
           <span>Guaranteed ${WEEKLY_BOSS_BASE.guaranteedLegendaries} legendary + ${WEEKLY_BOSS_BASE.treatyGuaranteed}\uD83C\uDF80</span>
         </div>
-        <button class="mission-send boss-send" data-boss-send ${boss.completed ? "disabled" : ""}>
+        <button class="mission-send boss-send" data-boss-send ${boss.completed ? "disabled" : ""} title="${boss.completed ? "This week's boss is defeated. Another appears next week." : `Open the party picker. Requires a full ${partyMax()}-cat party. Duration ${formatDuration(WEEKLY_BOSS_BASE.duration)}.`}">
           ${boss.completed ? "Defeated" : "Plan"}
         </button>
       </div>
@@ -641,7 +647,7 @@ function renderMissions() {
           <span>DC ${base.difficulty}</span>
           <span class="daily-mod">${escapeHtml(mod.label)}: ${escapeHtml(mod.desc)}</span>
         </div>
-        <button class="mission-send daily-send" data-daily-send="${daily.id}" ${daily.completed || !tierUnlocked ? "disabled" : ""}>
+        <button class="mission-send daily-send" data-daily-send="${daily.id}" ${daily.completed || !tierUnlocked ? "disabled" : ""} title="${daily.completed ? "Today's daily is done. Resets at UTC midnight." : !tierUnlocked ? "T" + daily.tier + " is not unlocked yet for your save." : `Open the party picker for today's T${daily.tier} daily. Modifier: ${mod.desc}.`}">
           ${daily.completed ? "Done" : !tierUnlocked ? "Locked" : "Plan"}
         </button>
       </div>
@@ -672,7 +678,7 @@ function renderMissions() {
           <span>Party 1\u2013${partyMax()}</span>
           <span>${tier.goldRange[0]}\u2013${tier.goldRange[1]}💰${tier.fishRange[1] ? ` · up to ${tier.fishRange[1]}🐟` : ""}${tier.treatyChance ? ` · 🎀` : ""} · ${tier.xpReward} xp</span>
         </div>
-        <button class="mission-send" data-tier="${tier.tier}" ${unlocked ? "" : "disabled"}>Plan</button>
+        <button class="mission-send" data-tier="${tier.tier}" ${unlocked ? "" : "disabled"} title="${unlocked ? `Open the party picker for T${tier.tier} ${hood.name}. ${formatDuration(tier.duration)} per run.` : "Locked — see requirements below the card."}">Plan</button>
       </div>
       ${unlockReq}`;
     host.appendChild(card);
@@ -766,7 +772,8 @@ function renderInventoryToolbar(host) {
       : stash.filter(i => i.rarity === f).length;
     const active = uiState.inventoryFilter === f ? "active" : "";
     const labelTxt = f === "all" ? "All" : f[0].toUpperCase() + f.slice(1);
-    return `<button class="inv-filter-pill ${active} rarity-${f}" data-inv-filter="${f}">${labelTxt} <span class="inv-filter-count">${count}</span></button>`;
+    const tip = f === "all" ? "Show all unequipped items" : `Show only ${f} items (${count})`;
+    return `<button class="inv-filter-pill ${active} rarity-${f}" data-inv-filter="${f}" title="${escapeHtml(tip)}">${labelTxt} <span class="inv-filter-count">${count}</span></button>`;
   }).join("");
 
   const unequippedCommons = gameState.inventory.filter(i => i.rarity === "common" && !isItemEquipped(i.id)).length;
@@ -792,11 +799,14 @@ function renderInventoryToolbar(host) {
       ${sortOptions.map(([v, l]) => `<option value="${v}" ${v === currentSort ? "selected" : ""}>${l}</option>`).join("")}
     </select></label>`;
 
+  // Bulk-sell previews their expected gold payout so the player knows what they're cashing in.
+  const commonSellValue = unequippedCommons * (RARITY_TIERS.common.bonusValue * 10);
+  const rareSellValue   = unequippedRares   * (RARITY_TIERS.rare.bonusValue * 10);
   host.innerHTML = `
     <div class="inv-filter-row">${pills}</div>
     <div class="inv-bulk-row">
-      <button class="inv-bulk-btn" data-bulk-sell="common" ${unequippedCommons ? "" : "disabled"}>Sell commons (${unequippedCommons})</button>
-      <button class="inv-bulk-btn" data-bulk-sell="rare"   ${unequippedRares ? "" : "disabled"}>Sell rares (${unequippedRares})</button>
+      <button class="inv-bulk-btn" data-bulk-sell="common" ${unequippedCommons ? "" : "disabled"} title="Sell every unequipped common for ${commonSellValue}\uD83D\uDCB0 total.">Sell commons (${unequippedCommons})</button>
+      <button class="inv-bulk-btn" data-bulk-sell="rare"   ${unequippedRares ? "" : "disabled"} title="Sell every unequipped rare for ${rareSellValue}\uD83D\uDCB0 total.">Sell rares (${unequippedRares})</button>
       ${sortSelect}
     </div>
     <div class="inv-legend muted" title="Gear matching a hood's element absorbs that hood's hazards. Higher-rarity pieces absorb more (C 1 · R 1 · E 2 · L 3).">
@@ -819,15 +829,16 @@ function renderShop() {
     if (item.strayBonus && pendingBonus > 0)                      stateBadge = `<div class="shop-state">Next mission +${Math.round(pendingBonus * 100)}%</div>`;
     const disabled = !available || !afford;
     const btnLabel = !available ? "Owned" : formatCost(item.cost);
+    const buyTip = !available ? "Already unlocked" : !afford ? insufficientMessage(item.cost) : `Buy for ${formatCost(item.cost)}`;
     return `
-      <div class="shop-item ${disabled ? "disabled" : ""}" data-shop="${item.id}">
+      <div class="shop-item ${disabled ? "disabled" : ""}" data-shop="${item.id}" title="${escapeHtml(item.desc)}">
         <div class="shop-icon">${item.icon}</div>
         <div class="shop-info">
           <div class="shop-name">${escapeHtml(item.name)}</div>
           <div class="shop-desc">${escapeHtml(item.desc)}</div>
           ${stateBadge}
         </div>
-        <button class="shop-buy" data-shop-buy="${item.id}" ${disabled ? "disabled" : ""}>${btnLabel}</button>
+        <button class="shop-buy" data-shop-buy="${item.id}" ${disabled ? "disabled" : ""} title="${escapeHtml(buyTip)}">${btnLabel}</button>
       </div>`;
   }).join("");
 }
@@ -1083,7 +1094,9 @@ function renderGarden() {
       const seedOpts = availableSeeds().map(s => {
         const afford = canAfford(s.cost);
         const costTxt = Object.entries(s.cost).map(([k, v]) => `${v}${k === "fishes" ? "\uD83D\uDC1F" : k === "treaties" ? "\uD83C\uDF80" : "\uD83D\uDCB0"}`).join(" ");
-        return `<button class="plot-seed-btn" data-plant-plot="${idx}" data-plant-seed="${s.id}" ${afford ? "" : "disabled"}>${s.icon} ${escapeHtml(s.name)} \u00B7 ${costTxt}</button>`;
+        const yieldList = s.yields.map(y => y.note).join(" \u00B7 ");
+        const tip = `Grows in ${formatDuration(s.growMs)}. Yields one of: ${yieldList}`;
+        return `<button class="plot-seed-btn" data-plant-plot="${idx}" data-plant-seed="${s.id}" ${afford ? "" : "disabled"} title="${escapeHtml(tip)}">${s.icon} ${escapeHtml(s.name)} \u00B7 ${costTxt}</button>`;
       }).join("");
       return `<div class="plot empty">
         <div class="plot-label muted">Plot ${idx + 1} \u00B7 empty</div>
@@ -1142,12 +1155,12 @@ function renderCommissionModal() {
   // Hood picker — only unlocked hoods.
   const hoodBtns = unlockedNeighborhoodIds().map(hid => {
     const h = NEIGHBORHOODS[hid];
-    return `<button class="commission-hood ${hid === c.neighborhoodId ? "active" : ""}" data-commission-hood="${hid}">${h.icon} ${escapeHtml(h.name)}</button>`;
+    return `<button class="commission-hood ${hid === c.neighborhoodId ? "active" : ""}" data-commission-hood="${hid}" title="${escapeHtml(h.flavor)}">${h.icon} ${escapeHtml(h.name)}</button>`;
   }).join("");
 
   // Tier picker — only unlocked tiers for the selected hood.
   const tierBtns = MISSION_TIERS.filter(t => isTierUnlocked(t.tier)).map(t =>
-    `<button class="commission-tier ${t.tier === c.tier ? "active" : ""}" data-commission-tier="${t.tier}">T${t.tier}</button>`
+    `<button class="commission-tier ${t.tier === c.tier ? "active" : ""}" data-commission-tier="${t.tier}" title="DC ${t.difficulty} \u00B7 ${formatDuration(t.duration)} \u00B7 ${t.goldRange[0]}\u2013${t.goldRange[1]}\uD83D\uDCB0">T${t.tier}</button>`
   ).join("") || `<span class="muted">No tiers unlocked yet.</span>`;
 
   // Modifier checkboxes.
@@ -1331,7 +1344,7 @@ function renderResearch() {
       const durStr = formatDuration(node.duration);
       let actionBtn = "";
       if (state === "available") {
-        actionBtn = `<button class="research-start-btn" data-research-start="${node.id}">Start \u00B7 ${costStr}</button>`;
+        actionBtn = `<button class="research-start-btn" data-research-start="${node.id}" title="${escapeHtml(node.desc)} Takes ${formatDuration(node.duration)}.">Start \u00B7 ${costStr}</button>`;
       } else if (state === "unaffordable") {
         actionBtn = `<button class="research-start-btn" disabled>Needs ${costStr}</button>`;
       } else if (state === "done") {
@@ -1611,7 +1624,7 @@ function renderCatNap() {
         Retire 15 cats, pick 1 to carry (with gear) into a new run. Kept cat gains <strong>Veteran +1</strong> (all base stats +1).
       </div>
       <div class="cat-nap-meta">Prestige count: ${gameState.prestigeCount || 0} · Run high tier: T${gameState.highestTier || 0}</div>
-      <button class="cat-nap-btn" id="cat-nap-btn" ${canNap ? "" : "disabled"}>${canNap ? "Begin Cat Nap\u2026" : reason}</button>
+      <button class="cat-nap-btn" id="cat-nap-btn" ${canNap ? "" : "disabled"} title="${canNap ? `Prestige for +${preview}\uD83C\uDF00 Nine Lives. You'll pick which cat(s) to keep.` : reason}">${canNap ? "Begin Cat Nap\u2026" : reason}</button>
     </div>`;
 }
 
@@ -1675,6 +1688,21 @@ function renderLog() {
 function renderActiveMissions() {
   const host = $("#missions-active-panel");
   const queue = gameState.missionQueue || [];
+  // Small count badge in the footer heading: "3 running · 2 queued". Gives at-a-glance
+  // totals even when the rows scroll off the visible area.
+  const badge = $("#active-count-badge");
+  if (badge) {
+    const running = gameState.missions.length;
+    if (!running && !queue.length) {
+      badge.style.display = "none";
+    } else {
+      const parts = [];
+      if (running)    parts.push(`${running} running`);
+      if (queue.length) parts.push(`${queue.length} queued`);
+      badge.textContent = parts.join(" \u00B7 ");
+      badge.style.display = "";
+    }
+  }
   if (!gameState.missions.length && !queue.length) {
     host.innerHTML = `<div class="empty-state">No active missions.</div>`;
     return;
@@ -2006,7 +2034,7 @@ function renderPicker() {
     return c && c.status === "idle";
   });
   const lastPartyLink = lastParty.length
-    ? `<button class="picker-last-party" id="picker-last-party">\u21BA Use last party (${lastParty.length})</button>`
+    ? `<button class="picker-last-party" id="picker-last-party" title="Select the same cats as your most recent mission (idle ones only).">\u21BA Use last party (${lastParty.length})</button>`
     : "";
 
   // Party presets — three slots, each independently save/load/clear.
@@ -2024,8 +2052,8 @@ function renderPicker() {
       return `<div class="picker-preset">
         <span class="picker-preset-label">Preset ${i + 1}:</span>
         <span class="picker-preset-names muted" title="${escapeHtml(names)}">${escapeHtml(names)}</span>
-        <button class="picker-preset-btn" data-preset-load="${i}" ${loadable ? "" : "disabled"}>Load (${loadable})</button>
-        <button class="picker-preset-btn" data-preset-save="${i}" ${currentSize ? "" : "disabled"} title="Overwrite with current selection">Save</button>
+        <button class="picker-preset-btn" data-preset-load="${i}" ${loadable ? "" : "disabled"} title="Select these ${loadable} idle cat${loadable === 1 ? "" : "s"} for this mission. Retired or busy cats from the saved preset are skipped.">Load (${loadable})</button>
+        <button class="picker-preset-btn" data-preset-save="${i}" ${currentSize ? "" : "disabled"} title="Overwrite preset ${i + 1} with the currently-selected cats.">Save</button>
       </div>`;
     }
     return `<div class="picker-preset">
@@ -2152,7 +2180,7 @@ function openGoldenMouseModal() {
   const choices = GOLDEN_MOUSE_CHOICES.map(choice => {
     const costTxt = Object.entries(choice.cost || {}).map(([k, v]) => `${v}${k === "fishes" ? "\uD83D\uDC1F" : k === "treaties" ? "\uD83C\uDF80" : "\uD83D\uDCB0"}`).join(" ");
     const afford = canAfford(choice.cost || {});
-    return `<button class="mouse-choice" data-mouse-choice="${choice.id}" ${afford ? "" : "disabled"}>
+    return `<button class="mouse-choice" data-mouse-choice="${choice.id}" ${afford ? "" : "disabled"} title="${escapeHtml(choice.desc)}">
       <div class="mouse-choice-head">${escapeHtml(choice.label)} ${costTxt ? `<span class="muted">· ${costTxt}</span>` : `<span class="muted">· free</span>`}</div>
       <div class="mouse-choice-desc muted">${escapeHtml(choice.desc)}</div>
     </button>`;
@@ -2324,11 +2352,10 @@ function closeModal() {
   $("#modal").classList.remove("open");
   $("#modal-body").innerHTML = "";
   uiState.picker = null;
-  // currentStray is set when a stray modal opens but never cleared after accept/decline,
-  // which silently suppressed every subsequent stray (presentNextStray bails on truthy).
+  // Source of truth for "is there a stray up right now" — presentNextStray bails on
+  // truthy, so clearing here lets subsequent queued strays open.
   uiState.currentStray = null;
-  // Chain to any queued follow-up modals — both strays and golden mouse events. Missing
-  // the mouse chain was why mouse events could sit in the queue after a stray dismiss.
+  // Chain to any queued follow-up modals so they open automatically.
   setTimeout(() => { presentNextStray(); presentNextGoldenMouse(); }, 0);
 }
 

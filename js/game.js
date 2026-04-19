@@ -202,7 +202,7 @@ function maybeQueueGoldenMouse(outcome) {
 function resolveGoldenMouse(choiceId) {
   const choice = GOLDEN_MOUSE_CHOICES.find(c => c.id === choiceId);
   if (!choice) return { ok: false, reason: "Unknown choice." };
-  if (!canAfford(choice.cost)) return { ok: false, reason: "Can't afford that." };
+  if (!canAfford(choice.cost)) return { ok: false, reason: insufficientMessage(choice.cost) };
   payCost(choice.cost);
   choice.apply();
   requestSave();
@@ -245,7 +245,7 @@ function startResearch(id) {
   const check = researchAvailableNode(id);
   if (!check.ok) return check;
   const node = check.node;
-  if (!canAfford(node.cost)) return { ok: false, reason: "Not enough resources." };
+  if (!canAfford(node.cost)) return { ok: false, reason: insufficientMessage(node.cost) };
   payCost(node.cost);
   const now = Date.now();
   gameState.research.active = { nodeId: node.id, startedAt: now, completesAt: now + node.duration };
@@ -1423,7 +1423,7 @@ function buyFishingUpgrade(id) {
   const lvl = gameState.fishing.upgrades[id] || 0;
   if (lvl >= up.max) return { ok: false, reason: "Maxed out." };
   const cost = up.costFn(lvl);
-  if (!canAfford(cost)) return { ok: false, reason: "Can't afford." };
+  if (!canAfford(cost)) return { ok: false, reason: insufficientMessage(cost) };
   payCost(cost);
   gameState.fishing.upgrades[id] = lvl + 1;
   logEvent(`Fishing upgrade: ${up.name} \u2192 ${lvl + 1}.`);
@@ -1447,7 +1447,7 @@ function plantSeed(plotIdx, seedId) {
   if (seed.requiresPrestige && (gameState.prestigeCount || 0) < seed.requiresPrestige) {
     return { ok: false, reason: `Requires Prestige ${seed.requiresPrestige}.` };
   }
-  if (!canAfford(seed.cost)) return { ok: false, reason: "Can't afford seed." };
+  if (!canAfford(seed.cost)) return { ok: false, reason: insufficientMessage(seed.cost) };
   payCost(seed.cost);
   const now = Date.now();
   gameState.garden.plots[plotIdx] = { seedId, plantedAt: now, finishedAt: now + seed.growMs };
@@ -1679,7 +1679,9 @@ function resolveMission(active) {
     let floorCap = 0.9 + (talents.floorCapRaise || 0);
     if (abilityFx.floorCapOverride !== null) floorCap = Math.max(floorCap, abilityFx.floorCapOverride);
     const floor = Math.min(floorCap, conFloor + bonuses.floorPct);
-    goldMul = floor; xpMul = floor; lootMul = floor * 0.5;
+    // Fail rewards scale with floor for gold/xp; loot drops softer but not punitively
+    // low (was 0.5 — dropping below 70% of gold felt anti-fun for close-margin fails).
+    goldMul = floor; xpMul = floor; lootMul = floor * 0.7;
   }
 
   const bestCha = Math.max(...cats.map(c => effectiveStats(c).cha));
@@ -2221,6 +2223,17 @@ function canAfford(cost) {
   return true;
 }
 
+// Builds a "Not enough X" message naming whichever currency is short. Keeps rejection
+// messages specific so the player knows exactly what to earn. Falls back to a generic
+// phrase if nothing is actually insufficient (defensive).
+function insufficientMessage(cost) {
+  const c = effectiveShopCost(cost);
+  if (c.gold     > (gameState.gold     || 0)) return "Not enough moneys \uD83D\uDCB0.";
+  if (c.fishes   > (gameState.fishes   || 0)) return "Not enough fishes \uD83D\uDC1F.";
+  if (c.treaties > (gameState.treaties || 0)) return "Not enough treaties \uD83C\uDF80.";
+  return "Can't afford that.";
+}
+
 function payCost(cost) {
   const c = effectiveShopCost(cost);
   gameState.gold     -= c.gold;
@@ -2245,7 +2258,7 @@ function shopItemAvailable(item) {
 function buyAutosell() {
   const item = SHOP_ITEMS.find(i => i.id === "autosell");
   if (gameState.shop.autoSellCommons) return { ok: false, reason: "Already unlocked." };
-  if (!canAfford(item.cost)) return { ok: false, reason: "Not enough moneys." };
+  if (!canAfford(item.cost)) return { ok: false, reason: insufficientMessage(item.cost) };
   payCost(item.cost);
   gameState.shop.autoSellCommons = true;
   logEvent("Auto-sell Commons unlocked.");
@@ -2255,7 +2268,7 @@ function buyAutosell() {
 
 function buyStraySummons() {
   const item = SHOP_ITEMS.find(i => i.id === "summons");
-  if (!canAfford(item.cost)) return { ok: false, reason: "Not enough treaties." };
+  if (!canAfford(item.cost)) return { ok: false, reason: insufficientMessage(item.cost) };
   payCost(item.cost);
   gameState.shop.pendingStraySummons++;
   gameState.stats = gameState.stats || {}; gameState.stats.consumablesBought = (gameState.stats.consumablesBought || 0) + 1;
@@ -2267,7 +2280,7 @@ function buyStraySummons() {
 function buyStrayConsumable(shopItemId) {
   const shopItem = SHOP_ITEMS.find(i => i.id === shopItemId);
   if (!shopItem || !shopItem.strayBonus) return { ok: false, reason: "Not a stray consumable." };
-  if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough fishes." };
+  if (!canAfford(shopItem.cost)) return { ok: false, reason: insufficientMessage(shopItem.cost) };
   payCost(shopItem.cost);
   // Research "Alchemy" doubles the pending stray bonus added per consumable.
   const amount = shopItem.strayBonus * researchStrayConsumableMul();
@@ -2282,7 +2295,7 @@ function buyTrainingTin(catId) {
   const item = SHOP_ITEMS.find(i => i.id === "training");
   const cat = findCat(catId);
   if (!cat) return { ok: false, reason: "No such cat." };
-  if (!canAfford(item.cost)) return { ok: false, reason: "Not enough fishes." };
+  if (!canAfford(item.cost)) return { ok: false, reason: insufficientMessage(item.cost) };
   payCost(item.cost);
   grantXp(cat, 500);
   logEvent(`${cat.name} savored a Training Tin (+500 xp).`);
@@ -2294,7 +2307,7 @@ function buyElementReroll(itemId) {
   const shopItem = SHOP_ITEMS.find(i => i.id === "reroll");
   const loot = findItem(itemId);
   if (!loot) return { ok: false, reason: "No such item." };
-  if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough fishes." };
+  if (!canAfford(shopItem.cost)) return { ok: false, reason: insufficientMessage(shopItem.cost) };
   payCost(shopItem.cost);
   // Reroll within unlocked hoods only, and never to the same affinity — gives the player
   // a guaranteed swap without the Subway/Dreaming "useless tag" trap before they unlock.
@@ -2311,7 +2324,7 @@ function buyStatTonic(catId) {
   const shopItem = SHOP_ITEMS.find(i => i.id === "tonic");
   const cat = findCat(catId);
   if (!cat) return { ok: false, reason: "No such cat." };
-  if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough treaties." };
+  if (!canAfford(shopItem.cost)) return { ok: false, reason: insufficientMessage(shopItem.cost) };
   // Require at least one stat under cap.
   if (STATS.every(s => cat.stats[s] >= BASE_STAT_CAP)) return { ok: false, reason: "All stats at cap." };
   payCost(shopItem.cost);
@@ -2327,7 +2340,7 @@ function buyKittenFormula(catId, newBreedId) {
   if (!cat) return { ok: false, reason: "No such cat." };
   if (cat.status !== "idle") return { ok: false, reason: "Cat is on a mission." };
   if (!CAT_BREEDS[newBreedId]) return { ok: false, reason: "Unknown class." };
-  if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough treaties." };
+  if (!canAfford(shopItem.cost)) return { ok: false, reason: insufficientMessage(shopItem.cost) };
   payCost(shopItem.cost);
   const breed = CAT_BREEDS[newBreedId];
   const oldLabel = CAT_BREEDS[cat.breed].classLabel;

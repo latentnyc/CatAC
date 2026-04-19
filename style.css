@@ -1695,6 +1695,22 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
 }
 .bulk-equip-btn:hover { background: #2a2a2e; color: #eee; }
 
+/* At-a-glance count badge next to "Active Missions" heading. */
+.active-count-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #a890ff;
+  background: #1c1a28;
+  border: 1px solid #3a3558;
+  border-radius: 10px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 /* Come-home control on an active mission row (one per mission, unambiguous for multi-cat) */
 .active-come-home {
   padding: 3px 10px;
