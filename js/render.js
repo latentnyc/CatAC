@@ -1582,6 +1582,21 @@ function renderCatNap() {
   const host = $("#cat-nap-area");
   if (!host) return;
   const preview = nineLivesPreview();
+  // Persistent nudge badge on the Eternal Perks summary header. Shows while prestige would
+  // earn a meaningful amount — most useful before the player's first nap, but stays on to
+  // remind veterans they have stacked-up gold waiting to cash in.
+  const napBadge = $("#eternal-nap-badge");
+  if (napBadge) {
+    const productive = preview >= 5;
+    if (productive) {
+      const firstNap = (gameState.prestigeCount || 0) === 0;
+      napBadge.textContent = firstNap ? `\u{1F4A4} +${preview}\uD83C\uDF00 ready` : `+${preview}\uD83C\uDF00`;
+      napBadge.style.display = "";
+      napBadge.classList.toggle("first-nap", firstNap);
+    } else {
+      napBadge.style.display = "none";
+    }
+  }
   const canNap = !gameState.missions.length && gameState.cats.some(c => c.status === "idle");
   const reason = gameState.missions.length ? "Finish active missions first"
     : !gameState.cats.length ? "No cats to carry"
@@ -2259,6 +2274,8 @@ function presentQueuedFlashes() {
       showFlashToast("\u2728", "Legendary drop!", ev.itemName, "toast-legendary");
     } else if (ev.type === "research") {
       showFlashToast("\uD83D\uDCDA", "Research complete", ev.name, "toast-research");
+    } else if (ev.type === "napNudge") {
+      showFlashToast("\u{1F4A4}", "Cat Nap ready", `+${ev.preview}\uD83C\uDF00 waiting \u2014 check Eternal Perks.`, "toast-nap");
     }
   }
   gameState._flashQueue = [];
@@ -2313,7 +2330,7 @@ const AUTO_OPEN_RULES = [
   { id: "achievement-details", trigger: () => Object.values(gameState.achievements || {}).some(a => a.claimed) },
   { id: "bestiary-details",    trigger: () => BESTIARY.some(c => bestiaryTier(c.id) >= 1) },
   { id: "mastery-details",     trigger: () => ITEM_SLOTS.some(slot => slotMasteryLevel(slot) >= 1) },
-  { id: "eternal-details",     trigger: () => (gameState.prestigeCount || 0) >= 1 || (gameState.nineLives || 0) > 0 },
+  { id: "eternal-details",     trigger: () => (gameState.prestigeCount || 0) >= 1 || (gameState.nineLives || 0) > 0 || nineLivesPreview() >= 5 },
   { id: "challenges-details",  trigger: () => (gameState.prestigeCount || 0) >= 1 },
   { id: "stars-details",       trigger: () => isStargazingUnlocked() },
   { id: "fishing-details",     trigger: () => isFishingUnlocked() },

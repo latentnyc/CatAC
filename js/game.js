@@ -2461,6 +2461,22 @@ function buyClubPerk(perkId) {
   return { ok: true };
 }
 
+// First-run Cat Nap nudge. Fires exactly once when the player has never prestiged and
+// their current nineLivesPreview() would return a meaningful amount (>= 5). New players
+// often stall at T5-T6 not realizing prestige unlocks the next band of perks (Third Seat,
+// T8, Eternal Perks); this gives them a clear signal without being nanny-ish.
+function checkFirstNapNudge() {
+  if ((gameState?.prestigeCount || 0) >= 1) return;
+  if (gameState?.achievementFlags?.firstNapNudged) return;
+  const preview = nineLivesPreview();
+  if (preview < 5) return;
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.firstNapNudged = true;
+  logEvent(`\u{1F4A4} Cat Nap is ready \u2014 carry a cat forward for +${preview}\uD83C\uDF00 Nine Lives. Open \u{1F300} Eternal Perks below to begin.`);
+  gameState._flashQueue = gameState._flashQueue || [];
+  gameState._flashQueue.push({ type: "napNudge", preview });
+}
+
 // Evaluate achievements; any that pass their check for the first time get auto-claimed,
 // reward granted, log entry posted. Called after meaningful state mutations.
 function checkAchievements() {
@@ -2478,6 +2494,8 @@ function checkAchievements() {
       logEvent(`\uD83C\uDFC6 Achievement: ${ach.name} \u2014 ${r.note || ""}`);
     }
   }
+  // Piggyback on the same cadence for the first-prestige nudge.
+  checkFirstNapNudge();
 }
 
 // --- Prestige / Cat Nap --------------------------------------------------
