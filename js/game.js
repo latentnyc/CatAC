@@ -196,20 +196,22 @@ function maybeQueueGoldenMouse(outcome) {
 }
 
 // Apply a chosen Golden Mouse effect. Returns { ok, reason } — reason for "can't afford".
+// Note: the queue entry was already drained at openGoldenMouseModal time so this function
+// only needs to apply the effect. Same applies to dismissGoldenMouse (now a no-op kept for
+// callsite compatibility).
 function resolveGoldenMouse(choiceId) {
   const choice = GOLDEN_MOUSE_CHOICES.find(c => c.id === choiceId);
   if (!choice) return { ok: false, reason: "Unknown choice." };
   if (!canAfford(choice.cost)) return { ok: false, reason: "Can't afford that." };
   payCost(choice.cost);
   choice.apply();
-  // Dequeue one event.
-  (gameState.goldenMouseQueue || []).shift();
   requestSave();
   return { ok: true };
 }
 
 function dismissGoldenMouse() {
-  (gameState.goldenMouseQueue || []).shift();
+  // Queue already drained at open-time; nothing to do here. Kept as a no-op so the UI
+  // dismiss handler stays symmetric with resolveGoldenMouse.
   requestSave();
 }
 

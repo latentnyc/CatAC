@@ -2141,6 +2141,11 @@ function openOfflineModal(summary) {
 function openGoldenMouseModal() {
   const body = $("#modal-body");
   if (!body) return;
+  // Drain the queued event AT open-time so Escape-closing doesn't leave it stuck.
+  // The choice/dismiss buttons no longer need to shift themselves — they just trigger
+  // the effect + close.
+  const event = (gameState.goldenMouseQueue || []).shift();
+  if (event) logEvent("\u{1F9C0} A glittering mouse scurries past the club window\u2026");
   const choices = GOLDEN_MOUSE_CHOICES.map(choice => {
     const costTxt = Object.entries(choice.cost || {}).map(([k, v]) => `${v}${k === "fishes" ? "\uD83D\uDC1F" : k === "treaties" ? "\uD83C\uDF80" : "\uD83D\uDCB0"}`).join(" ");
     const afford = canAfford(choice.cost || {});
@@ -2316,8 +2321,12 @@ function closeModal() {
   $("#modal").classList.remove("open");
   $("#modal-body").innerHTML = "";
   uiState.picker = null;
-  // Chain to next stray if queued.
-  setTimeout(presentNextStray, 0);
+  // currentStray is set when a stray modal opens but never cleared after accept/decline,
+  // which silently suppressed every subsequent stray (presentNextStray bails on truthy).
+  uiState.currentStray = null;
+  // Chain to any queued follow-up modals — both strays and golden mouse events. Missing
+  // the mouse chain was why mouse events could sit in the queue after a stray dismiss.
+  setTimeout(() => { presentNextStray(); presentNextGoldenMouse(); }, 0);
 }
 
 // --- Full render orchestrator -------------------------------------------

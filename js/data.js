@@ -35,7 +35,7 @@ const BOND_LOOT_PCT_BONUS = 0.02;
 
 // Golden Mouse — rare random events that fire on mission resolve. Player picks one of a few
 // choices (or passes). Low chance, non-irritating: never interrupts, always meaningful.
-const GOLDEN_MOUSE_CHANCE = 0.03; // 3% per non-failed resolve
+const GOLDEN_MOUSE_CHANCE = 0.06; // 6% per non-failed resolve (first sighting ~within ~15 missions)
 const GOLDEN_MOUSE_CHOICES = [
   { id: "chase",   label: "Chase",   desc: "Spend 3\uD83D\uDC1F for +2 rarity shift on the next mission.", cost: { fishes: 3 }, apply: () => { gameState.pendingRarityShift = (gameState.pendingRarityShift || 0) + 2; logEvent("\u{1F9C0} You chased the mouse! +2 rarity shift next mission."); } },
   { id: "pounce",  label: "Pounce",  desc: "Spend 2\uD83C\uDF80 for +10\uD83C\uDF80 immediately (risky gamble).", cost: { treaties: 2 }, apply: () => { gameState.treaties = (gameState.treaties || 0) + 10; logEvent("\u{1F9C0} You pounced! +10\uD83C\uDF80."); } },
