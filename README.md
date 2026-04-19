@@ -47,4 +47,5 @@ This is an alpha. Found a bug, have a balance thought, or noticed a dead end? Op
 
 ## License
 
-TBD — for now, all rights reserved. Ask before redistributing.
+[MIT](./LICENSE). Fork it, remix it, ship your own cat game — everything here is borrowed from every idle game that came before, and the least I can do is pass it on.
+
