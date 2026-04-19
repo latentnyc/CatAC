@@ -45,6 +45,11 @@ function rollCat(breedId) {
     for (const s of STATS) if (base[s] < base[minStat]) minStat = s;
     base[minStat] += 1;
   }
+  // Research "Ancient Tongues": +N to EVERY base stat on new strays (flat buff).
+  const researchBonus = researchStrayStatBonus();
+  if (researchBonus > 0) {
+    for (const s of STATS) base[s] += researchBonus;
+  }
   const palette = {
     fur:    hexShift(breed.palette.fur,    breed.paletteVariance.fur),
     accent: hexShift(breed.palette.accent, breed.paletteVariance.accent),
@@ -59,7 +64,8 @@ function rollCat(breedId) {
     palette,
     baseStats: { ...base },
     stats: { ...base },
-    level: 1,
+    // Research "Naming Theory" raises the starting level of new strays (default 1).
+    level: researchStrayStartLevel(),
     xp: 0,
     equipped,
     status: "idle",
@@ -67,8 +73,42 @@ function rollCat(breedId) {
     station: null,
     pendingStatChoices: 0,
     pendingTalentPoints: 0,
-    talents: {}
+    talents: {},
+    abilitiesUsed: 0
   };
+}
+
+// Active-ability helpers. Max charges grow with Veteran level so prestige investment pays.
+function catAbilityMaxCharges(cat) {
+  if (!cat) return 0;
+  return 1 + (cat.veteranLevel || 0);
+}
+function catAbilityAvailable(cat) {
+  return Math.max(0, catAbilityMaxCharges(cat) - (cat.abilitiesUsed || 0));
+}
+function catAbility(cat) {
+  if (!cat) return null;
+  return ACTIVE_ABILITIES[cat.breed] || null;
+}
+
+// Collapse the ability activations on an active mission into a single effect summary for
+// resolve-time math. durationMul is handled at start time; everything else is read here.
+function missionAbilityEffects(active) {
+  const out = { missionMit: 0, lootMul: 1.0, xpMul: 1.0, rarityShift: 0, floorCapOverride: null };
+  const acts = active?.abilityActivations || {};
+  for (const catId of Object.keys(acts)) {
+    const ability = catAbility(findCat(catId));
+    if (!ability) continue;
+    const e = ability.effect;
+    if (e.missionMit) out.missionMit += e.missionMit;
+    if (e.lootMul)    out.lootMul    *= e.lootMul;
+    if (e.xpMul)      out.xpMul      *= e.xpMul;
+    if (e.rarityShift)out.rarityShift += e.rarityShift;
+    if (e.floorCapOverride !== undefined) {
+      out.floorCapOverride = Math.max(out.floorCapOverride || 0, e.floorCapOverride);
+    }
+  }
+  return out;
 }
 
 function findCat(id)  { return gameState.cats.find(c => c.id === id) || null; }
@@ -169,6 +209,165 @@ function resolveGoldenMouse(choiceId) {
 function dismissGoldenMouse() {
   (gameState.goldenMouseQueue || []).shift();
   requestSave();
+}
+
+// --- Research Tree ------------------------------------------------------
+
+function isResearchUnlocked() {
+  return (gameState?.clubLevel || 1) >= RESEARCH_UNLOCK_CLUB_LEVEL;
+}
+
+function researchIsComplete(id) {
+  return !!(gameState?.research?.completed?.[id]);
+}
+
+// True if every prereq id is in the completed set.
+function researchPrereqsMet(node) {
+  if (!node?.prereq) return true;
+  return node.prereq.every(id => researchIsComplete(id));
+}
+
+function researchAvailableNode(id) {
+  const node = RESEARCH_NODES.find(n => n.id === id);
+  if (!node) return { ok: false, reason: "Unknown research." };
+  if (researchIsComplete(id)) return { ok: false, reason: "Already researched." };
+  if (!researchPrereqsMet(node)) return { ok: false, reason: "Prereqs not met." };
+  return { ok: true, node };
+}
+
+function startResearch(id) {
+  if (!isResearchUnlocked()) return { ok: false, reason: `Club Level ${RESEARCH_UNLOCK_CLUB_LEVEL} required.` };
+  if (gameState.research?.active) return { ok: false, reason: "Another research is already in progress." };
+  const check = researchAvailableNode(id);
+  if (!check.ok) return check;
+  const node = check.node;
+  if (!canAfford(node.cost)) return { ok: false, reason: "Not enough resources." };
+  payCost(node.cost);
+  const now = Date.now();
+  gameState.research.active = { nodeId: node.id, startedAt: now, completesAt: now + node.duration };
+  logEvent(`\uD83D\uDCDA Research started: ${node.name}.`);
+  requestSave();
+  return { ok: true };
+}
+
+// Cancel refunds half of each cost (floored). Chief purpose: escape hatch if the player
+// changes their mind, not a power move to exploit timing.
+function cancelResearch() {
+  const active = gameState.research?.active;
+  if (!active) return { ok: false, reason: "No research in progress." };
+  const node = RESEARCH_NODES.find(n => n.id === active.nodeId);
+  if (node?.cost) {
+    for (const [k, v] of Object.entries(node.cost)) {
+      gameState[k] = (gameState[k] || 0) + Math.floor(v / 2);
+    }
+  }
+  gameState.research.active = null;
+  logEvent(`Research cancelled: ${node?.name || active.nodeId} (half refund).`);
+  requestSave();
+  return { ok: true };
+}
+
+// Completes any active research whose timer has elapsed. Called from tick() so offline
+// catch-up handles completion automatically. Returns the completed node (or null).
+function tickResearch(now) {
+  const active = gameState.research?.active;
+  if (!active) return null;
+  if (active.completesAt > now) return null;
+  const node = RESEARCH_NODES.find(n => n.id === active.nodeId);
+  if (node) {
+    gameState.research.completed[node.id] = true;
+    logEvent(`\uD83D\uDCDA Research complete: ${node.name}.`);
+    // Flash toast so the completion is visible even while the player is off the panel.
+    gameState._flashQueue = gameState._flashQueue || [];
+    gameState._flashQueue.push({ type: "research", name: node.name });
+  }
+  gameState.research.active = null;
+  return node;
+}
+
+// Aggregate all completed research effects into a single totals object. One pass, cheap.
+// Consumers use accessors like researchXpMul() to stay insulated from the shape.
+function researchTotals() {
+  const t = {
+    xpMul: 1.0, goldMul: 1.0, durationMul: 1.0,
+    lootPct: 0, mitFlat: 0, rarityShift: 0, scorePerCat: 0,
+    strayStartLevel: 1, strayStatBonus: 0,
+    strayConsumableMul: 1, gardenQuantityMul: 1
+  };
+  const completed = gameState?.research?.completed || {};
+  for (const id of Object.keys(completed)) {
+    const node = RESEARCH_NODES.find(n => n.id === id);
+    if (!node?.effect) continue;
+    const e = node.effect;
+    if (e.xpMul)             t.xpMul *= e.xpMul;
+    if (e.goldMul)           t.goldMul *= e.goldMul;
+    if (e.durationMul)       t.durationMul *= e.durationMul;
+    if (e.lootPct)           t.lootPct += e.lootPct;
+    if (e.mitFlat)           t.mitFlat += e.mitFlat;
+    if (e.rarityShift)       t.rarityShift += e.rarityShift;
+    if (e.scorePerCat)       t.scorePerCat += e.scorePerCat;
+    if (e.strayStartLevel)   t.strayStartLevel = Math.max(t.strayStartLevel, e.strayStartLevel);
+    if (e.strayStatBonus)    t.strayStatBonus += e.strayStatBonus;
+    if (e.strayConsumableMul)t.strayConsumableMul = Math.max(t.strayConsumableMul, e.strayConsumableMul);
+    if (e.gardenQuantityMul) t.gardenQuantityMul = Math.max(t.gardenQuantityMul, e.gardenQuantityMul);
+  }
+  return t;
+}
+
+function researchXpMul()          { return researchTotals().xpMul; }
+function researchGoldMul()        { return researchTotals().goldMul; }
+function researchDurationMul()    { return researchTotals().durationMul; }
+function researchLootPct()        { return researchTotals().lootPct; }
+function researchMitFlat()        { return researchTotals().mitFlat; }
+function researchRarityShift()    { return researchTotals().rarityShift; }
+function researchScorePerCat()    { return researchTotals().scorePerCat; }
+function researchStrayStartLevel(){ return researchTotals().strayStartLevel; }
+function researchStrayStatBonus() { return researchTotals().strayStatBonus; }
+function researchGardenQuantityMul() { return researchTotals().gardenQuantityMul; }
+function researchStrayConsumableMul(){ return researchTotals().strayConsumableMul; }
+
+// --- Patrons ------------------------------------------------------------
+
+function isPatronUnlocked() {
+  return (gameState?.prestigeCount || 0) >= PATRON_REQUIRES_PRESTIGE;
+}
+
+function activePatron() {
+  if (!gameState?.patronId) return null;
+  return PATRONS.find(p => p.id === gameState.patronId) || null;
+}
+
+// First pick is free (hasPatron === false); subsequent swaps cost PATRON_SWAP_COST.
+function choosePatron(id) {
+  if (!isPatronUnlocked()) return { ok: false, reason: `Requires ${PATRON_REQUIRES_PRESTIGE} Cat Naps.` };
+  const next = PATRONS.find(p => p.id === id);
+  if (!next) return { ok: false, reason: "Unknown patron." };
+  if (gameState.patronId === id) return { ok: false, reason: "Already pledged to this patron." };
+  const isSwap = !!gameState.patronId;
+  if (isSwap && (gameState.nineLives || 0) < PATRON_SWAP_COST) {
+    return { ok: false, reason: `Swapping patrons costs ${PATRON_SWAP_COST}\uD83C\uDF00.` };
+  }
+  if (isSwap) gameState.nineLives -= PATRON_SWAP_COST;
+  gameState.patronId = id;
+  logEvent(`${next.icon} You pledge to ${next.name}. ${next.flavor}`);
+  requestSave();
+  return { ok: true, isSwap };
+}
+
+// --- Patron effect accessors -------------------------------------------
+// Every effect lookup goes through these so effects can be retuned in data.js without
+// chasing call sites. Each returns a safe default if no patron is active.
+
+function patronGoldMul()          { return activePatron()?.effects?.goldMul ?? 1.0; }
+function patronXpMul()            { return activePatron()?.effects?.xpMul ?? 1.0; }
+function patronStrayPct()         { return activePatron()?.effects?.strayPct ?? 0; }
+function patronShopDiscount()     { return activePatron()?.effects?.shopDiscount ?? 0; }
+function patronExtraAffixChance() { return activePatron()?.effects?.extraAffixChance ?? 0; }
+function patronBossDailyCurrencyMul() { return activePatron()?.effects?.bossDailyCurrencyMul ?? 1.0; }
+function patronMitMulForHood(hoodId) {
+  const byHood = activePatron()?.effects?.mitMulByHood;
+  if (!byHood) return 1.0;
+  return byHood[hoodId] ?? 1.0;
 }
 
 // --- Cat Bonds ---------------------------------------------------------
@@ -356,20 +555,22 @@ function partyBonuses(catIds) {
   const bondLoot = bondedPairsInParty(catIds) * BOND_LOOT_PCT_BONUS;
   return {
     mit:         (p.mit || 0)         + (s.mit || 0)         + (b.mit || 0)         + (t.mit || 0),
-    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + setLootPct + bondLoot + bestiaryGlobalLootPct() + eternalLootPct(),
+    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + setLootPct + bondLoot + bestiaryGlobalLootPct() + eternalLootPct() + researchLootPct(),
     speedPct:    Math.min(0.5, (p.speedPct || 0) + (s.speedPct || 0) + (t.speedPct || 0)),
     floorPct:    (p.floorPct || 0)    + (s.floorPct || 0),
     xpPct:       (p.xpPct || 0)       + (s.xpPct || 0)       + (b.xpPct || 0)       + (t.xpPct || 0),
-    rarityShift: (p.rarityShift || 0) + (s.rarityShift || 0) + (t.rarityShift || 0),
+    rarityShift: (p.rarityShift || 0) + (s.rarityShift || 0) + (t.rarityShift || 0) + researchRarityShift(),
     goldPct:     (s.goldPct || 0)                             + (t.goldPct || 0),
     scoreBonus:  (s.scoreBonus || 0)  + (b.scoreBonus || 0)  + (t.scoreBonus || 0)
   };
 }
 
 // Shared mitigation pool: matching-element gear + Scrapper "Bulwark" bonus + Guardian Pact
-// synergy + set bonuses (2/4-piece same-hood gear).
+// synergy + set bonuses (2/4-piece same-hood gear). Patron mitMulByHood scales matching
+// gear's contribution (Baker doubles Bakery gear, halves Lake gear, etc.).
 function partyMitigation(catIds, neighborhoodId) {
-  let total = 0;
+  let gearMit = 0;
+  const hoodMul = patronMitMulForHood(neighborhoodId);
   for (const catId of catIds) {
     const cat = findCat(catId);
     if (!cat) continue;
@@ -377,15 +578,18 @@ function partyMitigation(catIds, neighborhoodId) {
       const item = findItem(cat.equipped[slot]);
       if (!item) continue;
       if (item.affinity === neighborhoodId) {
-        total += ELEMENT_BONUS_BY_RARITY[item.rarity] || 0;
+        gearMit += (ELEMENT_BONUS_BY_RARITY[item.rarity] || 0) * hoodMul;
       }
     }
   }
+  let total = Math.floor(gearMit);
   total += partyBonuses(catIds).mit;
   // Gear set bonuses: +1 mit per 2-piece on the current hood, +3 more per 4-piece on the
   // current hood. Non-matching sets still contribute their global loot bump (applied via
   // partyBonuses.lootPct) but do NOT add mit here.
   total += gearSetBonuses(catIds, neighborhoodId).setMit;
+  // Research "Grand Workings" contributes flat mit to every mission.
+  total += researchMitFlat();
   return total;
 }
 
@@ -397,11 +601,12 @@ function activeEffects(mission) {
 }
 
 // Compute how mitigation spreads across effects and what the resulting DC penalty is.
-// Returns per-effect remaining severity + totals for UI and resolution.
-function missionEffectsSummary(catIds, mission) {
+// Returns per-effect remaining severity + totals for UI and resolution. `extraMit` lets
+// callers (e.g. resolveMission with a Scrapper Bastion activation) add one-shot mitigation.
+function missionEffectsSummary(catIds, mission, extraMit) {
   const effects = activeEffects(mission);
   const totalSeverity = effects.reduce((s, e) => s + e.severity, 0);
-  const mitigation = partyMitigation(catIds, mission.neighborhoodId);
+  const mitigation = partyMitigation(catIds, mission.neighborhoodId) + (extraMit || 0);
   let pool = mitigation;
   // Spend pool against highest-severity effects first so matching gear always "hurts the biggest".
   const sorted = [...effects].sort((a, b) => b.severity - a.severity);
@@ -715,6 +920,8 @@ function partyScore(catIds, mission) {
   total += partyBonuses(catIds).scoreBonus;
   // Cat Bonds: bonded pair in this party adds BOND_SCORE_BONUS per pair.
   total += bondedPairsInParty(catIds) * BOND_SCORE_BONUS;
+  // Research "Pack Behavior": +1 per cat in party.
+  total += cats.length * researchScorePerCat();
   return Math.round(total);
 }
 
@@ -1261,11 +1468,14 @@ function harvestPlot(plotIdx) {
     roll -= opt.weight;
     if (roll <= 0) { y = opt; break; }
   }
-  // Apply yield.
-  if      (y.kind === "fishes")      gameState.fishes    = (gameState.fishes    || 0) + y.amount;
-  else if (y.kind === "treaties")    gameState.treaties  = (gameState.treaties  || 0) + y.amount;
-  else if (y.kind === "nineLives")   gameState.nineLives = (gameState.nineLives || 0) + y.amount;
-  else if (y.kind === "clubXp")      grantClubXp(y.amount);
+  // Apply yield. Research "Herbalism" multiplies the quantity of numeric yields (flat/multi
+  // kinds aren't multiplied since "double strayBonus" is better handled by Alchemy).
+  const qMul = researchGardenQuantityMul();
+  const amt = y.amount * qMul;
+  if      (y.kind === "fishes")      gameState.fishes    = (gameState.fishes    || 0) + amt;
+  else if (y.kind === "treaties")    gameState.treaties  = (gameState.treaties  || 0) + amt;
+  else if (y.kind === "nineLives")   gameState.nineLives = (gameState.nineLives || 0) + amt;
+  else if (y.kind === "clubXp")      grantClubXp(amt);
   else if (y.kind === "strayBonus")  gameState.shop.pendingStrayBonus = (gameState.shop.pendingStrayBonus || 0) + y.amount;
   else if (y.kind === "rarityShift") gameState.pendingRarityShift = (gameState.pendingRarityShift || 0) + y.amount;
   gameState.garden.plots[plotIdx] = null;
@@ -1301,20 +1511,23 @@ function tickGarden(now) {
 }
 
 // startMission accepts two call shapes:
-//   startMission(catIds, neighborhoodId, tier, searchForStrays)    — regular tier mission
-//   startMission(catIds, missionObject, searchForStrays)            — synthetic mission (daily/boss)
-function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearch) {
+//   startMission(catIds, neighborhoodId, tier, searchForStrays, opts?)  — regular tier
+//   startMission(catIds, missionObject, searchForStrays, opts?)          — synthetic
+// opts: { autoRepeat: bool } — only meaningful for regular tier missions.
+function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearchOrOpts, maybeOpts) {
   if (!Array.isArray(catIds) || !catIds.length) return { ok: false, reason: "Pick at least one cat." };
 
-  let mission, searchForStrays;
+  let mission, searchForStrays, opts;
   if (typeof missionOrNbId === "string") {
     mission = getMission(missionOrNbId, tierOrSearch);
-    searchForStrays = maybeSearch;
+    searchForStrays = maybeSearchOrOpts;
+    opts = maybeOpts || {};
     if (!mission) return { ok: false, reason: "Unknown mission." };
     if (!isTierUnlocked(tierOrSearch)) return { ok: false, reason: "Tier locked." };
   } else {
     mission = missionOrNbId;
     searchForStrays = tierOrSearch;
+    opts = maybeSearchOrOpts || {};
     if (!mission) return { ok: false, reason: "Unknown mission." };
   }
   const neighborhoodId = mission.neighborhoodId;
@@ -1337,7 +1550,28 @@ function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearch) {
   const bestDex = Math.max(...cats.map(c => effectiveStats(c).dex));
   const dexBonus = Math.max(0, Math.min(0.5, (bestDex - 5) * 0.02));
   const speedPct = partyBonuses(catIds).speedPct;
-  const durationMul = Math.max(0.35, (1 - dexBonus) * (1 - speedPct));
+  // Active-ability activations supplied by the picker. Validates + consumes charges.
+  // Shape: { catId: abilityId } — catId must be in the party, ability must match breed.
+  const abilityActivations = {};
+  const requested = opts.catAbilities || {};
+  for (const id of catIds) {
+    const aid = requested[id];
+    if (!aid) continue;
+    const cat = findCat(id);
+    const ability = catAbility(cat);
+    if (!cat || !ability || ability.id !== aid) continue;
+    if (catAbilityAvailable(cat) < 1) continue;
+    abilityActivations[id] = aid;
+    cat.abilitiesUsed = (cat.abilitiesUsed || 0) + 1;
+  }
+  // Apply any start-phase ability effects (duration changes fire now, not on resolve).
+  let abilityDurationMul = 1.0;
+  for (const id of Object.keys(abilityActivations)) {
+    const ability = catAbility(findCat(id));
+    if (ability?.effect?.durationMul) abilityDurationMul *= ability.effect.durationMul;
+  }
+  // Research "Efficient Logistics" multiplies duration (after its floor clamp).
+  const durationMul = Math.max(0.35, (1 - dexBonus) * (1 - speedPct) * abilityDurationMul) * researchDurationMul();
   const duration = Math.floor(mission.duration * durationMul);
 
   // Lock in stray consumables at mission start — but only if actually searching,
@@ -1374,6 +1608,11 @@ function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearch) {
     straySummoned: lockedSummons > 0,
     strayBonusChance: lockedBonus,
     rarityShiftBonus: lockedRarityShift,
+    // Auto-repeat: set only for regular tier missions. Daily/boss/commission are one-shots.
+    autoRepeat: !!(opts.autoRepeat && !mission.isDaily && !mission.isBoss && !mission.isChallenge),
+    // Active abilities queued on this mission: { catId: abilityId }. Consumed at start;
+    // resolveMission reads this to apply mit/xp/loot/floor/rarity bonuses.
+    abilityActivations,
     dailyId: mission.dailyId || null,
     bossId:  mission.bossId  || null
   };
@@ -1406,7 +1645,10 @@ function resolveMission(active) {
   }
 
   const score = partyScore(active.catIds, mission);
-  const effectsSummary = missionEffectsSummary(active.catIds, mission);
+  // Ability activations for this mission — folded into mit, loot roll, xp, rarity shift,
+  // and floor cap via missionAbilityEffects(). Duration already applied at start.
+  const abilityFx = missionAbilityEffects(active);
+  const effectsSummary = missionEffectsSummary(active.catIds, mission, abilityFx.missionMit);
   const margin = score - effectsSummary.effectiveDC;
 
   const bonuses = partyBonuses(active.catIds);
@@ -1418,9 +1660,11 @@ function resolveMission(active) {
     outcome = "fail";
     const bestCon = Math.max(...cats.map(c => effectiveStats(c).con));
     const conFloor = Math.min(0.75, 0.2 + Math.max(0, bestCon - 5) * 0.03);
-    // Purrist "Tending" adds flat % to failure floor. Base cap 0.9, Sanctuary talent raises it.
+    // Purrist "Tending" adds flat % to failure floor. Base cap 0.9, Sanctuary talent raises
+    // it. Purrist ability override (floorCapOverride) trumps both (up to 1.0 = no penalty).
     const talents = partyTalentTotals(active.catIds);
-    const floorCap = 0.9 + (talents.floorCapRaise || 0);
+    let floorCap = 0.9 + (talents.floorCapRaise || 0);
+    if (abilityFx.floorCapOverride !== null) floorCap = Math.max(floorCap, abilityFx.floorCapOverride);
     const floor = Math.min(floorCap, conFloor + bonuses.floorPct);
     goldMul = floor; xpMul = floor; lootMul = floor * 0.5;
   }
@@ -1433,28 +1677,36 @@ function resolveMission(active) {
   // Full Spectrum synergy adds to gold as well.
   const goldSynergyMul = 1 + bonuses.goldPct;
 
+  // Daily & Weekly Boss missions get a patron-specified currency multiplier (Night Market
+  // trades shop bargains for halved event rewards). Applied only to currencies, not XP/loot.
+  const bossDailyMul = (mission.isDaily || mission.isBoss) ? patronBossDailyCurrencyMul() : 1.0;
+
   const rawGold = randInt(mission.goldRange[0], mission.goldRange[1]);
-  const gold = Math.max(1, Math.floor(rawGold * goldMul * chaBonus * partySizeBonus * goldSynergyMul * bestiaryGlobalGoldMul() * eternalGoldMul()));
-  const xpPerCat = Math.max(1, Math.floor(mission.xpReward * xpMul * (1 + bonuses.xpPct) * eternalXpMul()));
+  const gold = Math.max(1, Math.floor(rawGold * goldMul * chaBonus * partySizeBonus * goldSynergyMul * bestiaryGlobalGoldMul() * eternalGoldMul() * patronGoldMul() * researchGoldMul() * bossDailyMul));
+  const xpPerCat = Math.max(1, Math.floor(mission.xpReward * xpMul * (1 + bonuses.xpPct) * eternalXpMul() * patronXpMul() * researchXpMul() * abilityFx.xpMul));
 
   // Fishes: small count per mission, scaled by outcome and party size. Ranger Pathfinder
-  // talent bumps the multiplier for its party.
+  // talent bumps the multiplier for its party. Daily/Boss patron penalty applies here too.
   const talentTotals = partyTalentTotals(active.catIds);
   const rawFish = randInt(mission.fishRange[0], mission.fishRange[1]);
-  const fishes = Math.max(0, Math.floor(rawFish * goldMul * partySizeBonus * (1 + (talentTotals.fishPct || 0))));
+  const fishes = Math.max(0, Math.floor(rawFish * goldMul * partySizeBonus * (1 + (talentTotals.fishPct || 0)) * bossDailyMul));
 
   // Treaties: rare drop, only meaningful at higher tiers. Plus any daily/boss guaranteed bonus.
+  // Night Market patron halves daily/boss treaty rewards (the big guarantees, mostly).
   let treaties = 0;
   if (outcome !== "fail" && Math.random() < mission.treatyChance * partySizeBonus) {
     treaties = 1 + (outcome === "crit" ? 1 : 0);
   }
   if (outcome !== "fail") treaties += (mission.bonusTreaties || 0);
+  if ((mission.isDaily || mission.isBoss) && bossDailyMul !== 1.0) {
+    treaties = Math.floor(treaties * bossDailyMul);
+  }
 
   const items = [];
   const bestWis = Math.max(...cats.map(c => effectiveStats(c).wis));
-  const lootBonusMul = 1 + bonuses.lootPct;
+  const lootBonusMul = (1 + bonuses.lootPct) * (abilityFx.lootMul || 1.0);
   const lootRolls = Math.max(1, mission.lootRolls || 1);
-  const combinedRarityShift = (bonuses.rarityShift || 0) + (mission.rarityShift || 0) + (active.rarityShiftBonus || 0);
+  const combinedRarityShift = (bonuses.rarityShift || 0) + (mission.rarityShift || 0) + (active.rarityShiftBonus || 0) + (abilityFx.rarityShift || 0);
   for (let i = 0; i < cats.length; i++) {
     for (let r = 0; r < lootRolls; r++) {
       if (Math.random() < mission.lootChance * lootMul * lootBonusMul) {
@@ -1466,6 +1718,8 @@ function resolveMission(active) {
             gameState.achievementFlags.sawLegendary = true;
             // Ranger "Apex Predator" talent grants +1 treaty per legendary.
             if (talentTotals.apexPredator) gameState.treaties = (gameState.treaties || 0) + 1;
+            gameState._flashQueue = gameState._flashQueue || [];
+            gameState._flashQueue.push({ type: "legendary", itemName: item.name });
           }
         }
       }
@@ -1480,6 +1734,8 @@ function resolveMission(active) {
         gameState.achievementFlags = gameState.achievementFlags || {};
         gameState.achievementFlags.sawLegendary = true;
         if (talentTotals.apexPredator) gameState.treaties = (gameState.treaties || 0) + 1;
+        gameState._flashQueue = gameState._flashQueue || [];
+        gameState._flashQueue.push({ type: "legendary", itemName: legendary.name });
       }
     }
   }
@@ -1553,7 +1809,7 @@ function resolveMission(active) {
     if (active.straySummoned) {
       strayOffer = rollCat();
     } else if (active.searchForStrays) {
-      const strayChance = STRAY_BASE_CHANCE + (mission.tier - 1) * STRAY_TIER_BONUS + (active.strayBonusChance || 0) + bestiaryStrayBonus() + eternalStrayPct();
+      const strayChance = STRAY_BASE_CHANCE + (mission.tier - 1) * STRAY_TIER_BONUS + (active.strayBonusChance || 0) + bestiaryStrayBonus() + eternalStrayPct() + patronStrayPct();
       if (Math.random() < strayChance) strayOffer = rollCat();
     }
   }
@@ -1579,6 +1835,20 @@ function resolveMission(active) {
   logEvent(`${cats.map(c => c.name).join(", ")} ${verb} T${mission.tier} ${hood.name} (+${gold}💰, +${xpPerCat}xp each${fishTxt}${treatyTxt}${lootTxt})${hazardTail}`);
 
   checkAchievements();
+
+  // Auto-repeat: if the resolving mission was flagged and the same party is fully idle +
+  // present, re-fire the same tier/hood with the same settings. Stops silently on any
+  // mismatch (retired cat, cat now stationed, tier re-locked, etc.) — never surprises
+  // the player mid-chain. Only regular tier missions can auto-repeat.
+  if (active.autoRepeat) {
+    const stillIdle = active.catIds.every(id => {
+      const c = findCat(id);
+      return c && c.status === "idle";
+    });
+    if (stillIdle && isTierUnlocked(active.tier)) {
+      startMission(active.catIds, active.neighborhoodId, active.tier, active.searchForStrays, { autoRepeat: true });
+    }
+  }
 
   // Quest lifecycle: flush synchronously so a resolved mission's rewards are never lost.
   saveStateNow();
@@ -1630,8 +1900,11 @@ function generateItem(rarity, stats) {
   const adjective = choice(tier.adjectives);
 
   let numAffixes = tier.numAffixes;
-  if (stats && rarity !== "legendary" && Math.random() < Math.max(0, (stats.int || 0) - 5) * 0.03) {
-    numAffixes = Math.min(2, numAffixes + 1);
+  if (rarity !== "legendary") {
+    // INT-based bonus, plus Librarian patron's flat extra-affix chance (independent roll).
+    const intChance = stats ? Math.max(0, (stats.int || 0) - 5) * 0.03 : 0;
+    if (Math.random() < intChance) numAffixes = Math.min(2, numAffixes + 1);
+    else if (Math.random() < patronExtraAffixChance()) numAffixes = Math.min(2, numAffixes + 1);
   }
 
   const pool = [...STATS];
@@ -1675,6 +1948,9 @@ function grantXp(cat, amount) {
     } else {
       logEvent(`${cat.name} reached level ${cat.level}.`);
     }
+    // Queue a flash toast for main.js to present. Coalesces multi-level gains per cat.
+    gameState._flashQueue = gameState._flashQueue || [];
+    gameState._flashQueue.push({ type: "levelUp", catId: cat.id, name: cat.name, level: cat.level });
   }
 }
 
@@ -1856,9 +2132,12 @@ function retireCat(catId) {
 
 // --- Club Shop ----------------------------------------------------------
 
-// Effective cost factors in the Merchant club perk (20% off consumables).
+// Effective cost composes the Merchant club perk (20% off) with any patron shopDiscount
+// (Baker -10%, Night Market -50%). Multiplicative so combined max ≈ -60% (Merchant + NM).
 function effectiveShopCost(cost) {
-  const mul = gameState?.clubPerks?.merchant ? 0.8 : 1;
+  let mul = 1.0;
+  if (gameState?.clubPerks?.merchant) mul *= 0.8;
+  mul *= (1 - patronShopDiscount());
   return {
     gold:     Math.ceil((cost.gold     || 0) * mul),
     fishes:   Math.ceil((cost.fishes   || 0) * mul),
@@ -1921,7 +2200,9 @@ function buyStrayConsumable(shopItemId) {
   if (!shopItem || !shopItem.strayBonus) return { ok: false, reason: "Not a stray consumable." };
   if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough fishes." };
   payCost(shopItem.cost);
-  gameState.shop.pendingStrayBonus = (gameState.shop.pendingStrayBonus || 0) + shopItem.strayBonus;
+  // Research "Alchemy" doubles the pending stray bonus added per consumable.
+  const amount = shopItem.strayBonus * researchStrayConsumableMul();
+  gameState.shop.pendingStrayBonus = (gameState.shop.pendingStrayBonus || 0) + amount;
   logEvent(`${shopItem.name} stashed. Next mission stray bonus: +${Math.round(gameState.shop.pendingStrayBonus * 100)}%.`);
   requestSave();
   return { ok: true };
@@ -2095,8 +2376,10 @@ function prestige(keepCatIdOrIds) {
   if (keptCats.length !== ids.length) return { ok: false, reason: "Some kept cats are missing." };
   if (keptCats.some(c => c.status === "mission")) return { ok: false, reason: "A kept cat is on a mission." };
   // Clear station assignments on every kept cat (minigames reset on prestige anyway).
+  // Also refresh their active-ability charges so the new run starts with full stock.
   for (const k of keptCats) {
     if (k.status === "stationed") { k.status = "idle"; k.station = null; }
+    k.abilitiesUsed = 0;
   }
 
   const earned = nineLivesPreview();
@@ -2151,7 +2434,11 @@ function prestige(keepCatIdOrIds) {
     tutorialSeen:     gameState.tutorialSeen,
     uiAutoOpened:     gameState.uiAutoOpened,
     // Cat Bonds carry forward so kept-cat pairs retain their history.
-    catBonds:         gameState.catBonds
+    catBonds:         gameState.catBonds,
+    // Patron is a meta-faction commitment; it persists across every prestige.
+    patronId:         gameState.patronId,
+    // Research carries over — both completed nodes and any in-progress timer.
+    research:         gameState.research
   };
   // freshRunShell takes one starter; pass the first kept cat and splice the rest in after.
   const fresh = freshRunShell(persistents, keptCats[0], persistents.eternalPerks.headStartGold || 0);
@@ -2227,7 +2514,11 @@ function tick() {
   tickStargazing(now);
   // Dynasty: lounge cats trickle XP to all idle/stationed cats.
   tickLoungeTrickle(now);
+  // Research completes passively based on real time. Completion implies UI state changed.
+  const researched = tickResearch(now);
   gameState.lastTick = now;
+  // Expose both so main.js can decide whether to re-render.
+  resolved._research = researched;
   return resolved;
 }
 

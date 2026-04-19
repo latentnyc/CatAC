@@ -35,10 +35,11 @@ function boot() {
     frames++;
     if (frames % 6 === 0) {
       const resolved = tick();
-      if (resolved.length) {
+      if (resolved.length || resolved._research) {
         queueStrays(resolved);
         for (const r of resolved) showMissionToast(r);
         renderAll();
+        presentQueuedFlashes();
         presentNextStray();
         presentNextGoldenMouse();
       }
@@ -61,6 +62,9 @@ function boot() {
 function onMutation() {
   renderAll();
   requestSave();
+  // Drain flash toasts queued by synchronous actions (shop training, tonics, level-ups
+  // that happen outside the tick loop, etc.).
+  presentQueuedFlashes();
   // Stray + mouse presenters both no-op if a modal is already open.
   presentNextStray();
   presentNextGoldenMouse();

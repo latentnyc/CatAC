@@ -57,6 +57,11 @@ function freshRunShell(persistents, starter, initialGold) {
     // Cat Bonds — map of "idA|idB" (sorted) to co-mission count. Persists across prestige so
     // kept-cat pairs keep their history; pairs with retired cats stay in the map but go dormant.
     catBonds:         persistents.catBonds         || {},
+    // Patron — null until the player picks one (gated at prestige 3). Persists across naps.
+    patronId:         persistents.patronId         || null,
+    // Research — long-horizon tech tree. `active` is a real-time timer; `completed` is a
+    // permanent set. Both persist across prestige so investment pays off forever.
+    research:         persistents.research         || { active: null, completed: {} },
     // Golden Mouse event queue — events appear as modals; ephemeral per run (reset on Nap).
     goldenMouseQueue: [],
     // First-run onboarding: welcome modal shows once, auto-opened panels stay remembered.
@@ -150,20 +155,40 @@ function loadState() {
     if (typeof parsed.lastLoungeTrickle === "undefined") parsed.lastLoungeTrickle = null;
     parsed.catBonds = parsed.catBonds || {};
     parsed.goldenMouseQueue = parsed.goldenMouseQueue || [];
+    if (typeof parsed.patronId === "undefined") parsed.patronId = null;
+    if (!parsed.research) parsed.research = { active: null, completed: {} };
+    parsed.research.completed = parsed.research.completed || {};
+    if (typeof parsed.research.active === "undefined") parsed.research.active = null;
     if (typeof parsed.tutorialSeen !== "boolean") parsed.tutorialSeen = false;
     parsed.uiAutoOpened = parsed.uiAutoOpened || {};
 
-    // Defensive: stationed cats should have status "stationed" + cat.station set.
-    // Reconcile both sides in case save was edited or shaped before this feature.
+    // Defensive: reconcile cat.station and station.assignedCatId. The station's
+    // assignedCatId is the source of truth; cat.station / cat.status are derived.
+    //   Step 1 — clear dangling station refs whose cats no longer exist.
+    //   Step 2 — sync each cat's fields to match whichever station (if any) claims them.
+    // Handles both directions of drift (edited saves, old format, feature rollout).
+    const stationSaves = { fishing: parsed.fishing, garden: parsed.garden, stargazing: parsed.stargazing };
     for (const cat of parsed.cats) {
       if (typeof cat.station === "undefined") cat.station = null;
     }
-    for (const [stId, save] of [["fishing", parsed.fishing], ["garden", parsed.garden], ["stargazing", parsed.stargazing]]) {
+    for (const [stId, save] of Object.entries(stationSaves)) {
       if (!save.assignedCatId) continue;
       const c = parsed.cats.find(x => x.id === save.assignedCatId);
-      if (!c) { save.assignedCatId = null; continue; }
-      c.status = "stationed";
-      c.station = stId;
+      if (!c) save.assignedCatId = null;
+    }
+    const claimedBy = {};
+    for (const [stId, save] of Object.entries(stationSaves)) {
+      if (save.assignedCatId) claimedBy[save.assignedCatId] = stId;
+    }
+    for (const cat of parsed.cats) {
+      if (claimedBy[cat.id]) {
+        cat.status = "stationed";
+        cat.station = claimedBy[cat.id];
+      } else if (cat.status === "stationed" || cat.station) {
+        // Cat says it's stationed somewhere, but no station claims it — back to idle.
+        cat.status = "idle";
+        cat.station = null;
+      }
     }
     for (const cat of parsed.cats) {
       for (const slot of ITEM_SLOTS) {
@@ -173,6 +198,7 @@ function loadState() {
       if (typeof cat.pendingStatChoices !== "number") cat.pendingStatChoices = 0;
       if (typeof cat.pendingTalentPoints !== "number") cat.pendingTalentPoints = 0;
       if (!cat.talents) cat.talents = {};
+      if (typeof cat.abilitiesUsed !== "number") cat.abilitiesUsed = 0;
     }
     return parsed;
   } catch (err) {

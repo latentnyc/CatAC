@@ -188,6 +188,34 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// K/M/B suffix formatter. Keeps small numbers readable (0–9999 shown as integers), then
+// transitions to 1 decimal place for larger magnitudes. Strips trailing ".0" so e.g.
+// 12345 → "12.3K" but 12000 → "12K" (cleaner than "12.0K").
+function formatNumber(n) {
+  if (n == null || isNaN(n)) return "0";
+  const sign = n < 0 ? "-" : "";
+  n = Math.abs(Math.floor(n));
+  if (n < 10000)         return sign + n.toString();
+  const units = [
+    { v: 1e12, s: "T" },
+    { v: 1e9,  s: "B" },
+    { v: 1e6,  s: "M" },
+    { v: 1e3,  s: "K" }
+  ];
+  for (const { v, s } of units) {
+    if (n >= v) {
+      const scaled = n / v;
+      // Truncate to 1 decimal (not round) so 99999 displays "99.9K" not "100K". Strip
+      // trailing ".0" for clean edges: 10K, 100K, 1M instead of "10.0K" etc.
+      const txt = scaled < 100
+        ? (Math.floor(scaled * 10) / 10).toString()
+        : Math.floor(scaled).toString();
+      return sign + txt + s;
+    }
+  }
+  return sign + n.toString();
+}
+
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.round(ms / 1000));
   if (totalSec < 60) return `${totalSec}s`;
@@ -205,11 +233,29 @@ function formatDuration(ms) {
 // --- Top bar -------------------------------------------------------------
 
 function renderTopBar() {
-  $("#gold").textContent       = Math.floor(gameState.gold);
-  $("#fishes").textContent     = Math.floor(gameState.fishes || 0);
-  $("#treaties").textContent   = Math.floor(gameState.treaties || 0);
-  $("#nine-lives").textContent = Math.floor(gameState.nineLives || 0);
-  $("#cat-count").textContent  = `${gameState.cats.length}/${clubMax()}`;
+  // Display abbreviated; the exact count lives in the title attribute on the parent span
+  // so a hover shows the precise number (useful when you care exactly, e.g. before prestige).
+  const g  = Math.floor(gameState.gold);
+  const fs = Math.floor(gameState.fishes   || 0);
+  const tr = Math.floor(gameState.treaties || 0);
+  const nl = Math.floor(gameState.nineLives || 0);
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = formatNumber(val);
+    const parent = el.parentElement;
+    if (parent) {
+      // Preserve the original description tooltip but append the precise number.
+      const base = parent.dataset.baseTitle || parent.getAttribute("title") || "";
+      if (!parent.dataset.baseTitle) parent.dataset.baseTitle = base;
+      parent.setAttribute("title", `${parent.dataset.baseTitle}\n\nExact: ${val.toLocaleString()}`);
+    }
+  };
+  set("gold", g);
+  set("fishes", fs);
+  set("treaties", tr);
+  set("nine-lives", nl);
+  $("#cat-count").textContent = `${gameState.cats.length}/${clubMax()}`;
 }
 
 // --- Party panel ---------------------------------------------------------
@@ -1169,6 +1215,161 @@ function openStationAssignPicker(stationId) {
   $("#modal").classList.add("open");
 }
 
+// --- Research panel -----------------------------------------------------
+
+function renderResearch() {
+  const host = $("#research-panel");
+  if (!host) return;
+  if (!isResearchUnlocked()) {
+    const n = RESEARCH_UNLOCK_CLUB_LEVEL;
+    const have = gameState.clubLevel || 1;
+    host.innerHTML = `<div class="minigame-locked">\uD83D\uDD12 Club Level ${n} unlocks the Research Library (${have}/${n}).</div>`;
+    host.dataset.researchState = "locked";
+    return;
+  }
+  const active = gameState.research?.active;
+  const completed = gameState.research?.completed || {};
+
+  // Active row at the top, if something's being researched.
+  let activeBlock = "";
+  if (active) {
+    const node = RESEARCH_NODES.find(n => n.id === active.nodeId);
+    const now = Date.now();
+    const remaining = Math.max(0, active.completesAt - now);
+    const total = active.completesAt - active.startedAt;
+    const pct = Math.max(0, Math.min(100, 100 * (1 - remaining / total)));
+    activeBlock = `
+      <div class="research-active">
+        <div class="research-active-head">
+          <span class="research-icon">${node?.icon || "\uD83D\uDCDA"}</span>
+          <span class="research-name">${escapeHtml(node?.name || "Research")}</span>
+          <button class="research-cancel-btn" id="research-cancel" title="Cancel (half refund)">Cancel</button>
+        </div>
+        <div class="research-bar"><div class="research-bar-fill" style="width:${pct}%"></div></div>
+        <div class="research-eta muted">${remaining > 0 ? formatDuration(remaining) : "Finalizing\u2026"}</div>
+      </div>`;
+  }
+
+  // Group nodes by tier.
+  const tiers = {};
+  for (const n of RESEARCH_NODES) {
+    tiers[n.tier] = tiers[n.tier] || [];
+    tiers[n.tier].push(n);
+  }
+  const tierLabels = { 1: "Foundations", 2: "Intermediate", 3: "Advanced", 4: "Grand" };
+
+  const tierBlocks = Object.keys(tiers).sort().map(t => {
+    const rows = tiers[t].map(node => {
+      const isDone = !!completed[node.id];
+      const isActive = active && active.nodeId === node.id;
+      const prereqsMet = researchPrereqsMet(node);
+      const afford = canAfford(node.cost);
+      const state = isDone ? "done" : isActive ? "active" : !prereqsMet ? "locked" : !afford ? "unaffordable" : "available";
+      const costStr = Object.entries(node.cost).map(([k, v]) => `${v}${k === "fishes" ? "\uD83D\uDC1F" : k === "treaties" ? "\uD83C\uDF80" : "\uD83D\uDCB0"}`).join(" ");
+      const durStr = formatDuration(node.duration);
+      let actionBtn = "";
+      if (state === "available") {
+        actionBtn = `<button class="research-start-btn" data-research-start="${node.id}">Start \u00B7 ${costStr}</button>`;
+      } else if (state === "unaffordable") {
+        actionBtn = `<button class="research-start-btn" disabled>Needs ${costStr}</button>`;
+      } else if (state === "done") {
+        actionBtn = `<span class="research-done-pill">\u2713 Done</span>`;
+      } else if (state === "active") {
+        actionBtn = `<span class="research-active-pill">In progress</span>`;
+      } else {
+        const locks = node.prereq.filter(id => !completed[id]).map(id => RESEARCH_NODES.find(x => x.id === id)?.name || id);
+        actionBtn = `<span class="research-lock-pill" title="Needs: ${escapeHtml(locks.join(", "))}">\uD83D\uDD12 Locked</span>`;
+      }
+      return `<div class="research-node research-node-${state}">
+        <div class="research-node-icon">${node.icon}</div>
+        <div class="research-node-body">
+          <div class="research-node-name">${escapeHtml(node.name)} <span class="muted">\u00B7 ${durStr}</span></div>
+          <div class="research-node-desc muted">${escapeHtml(node.desc)}</div>
+        </div>
+        <div class="research-node-action">${actionBtn}</div>
+      </div>`;
+    }).join("");
+    return `
+      <div class="research-tier">
+        <div class="research-tier-label muted">${tierLabels[t] || ("Tier " + t)}</div>
+        ${rows}
+      </div>`;
+  }).join("");
+
+  const completedCount = Object.keys(completed).length;
+  host.innerHTML = `
+    ${activeBlock}
+    <div class="research-summary muted">${completedCount} / ${RESEARCH_NODES.length} researched</div>
+    ${tierBlocks}`;
+  host.dataset.researchState = active ? "active" : "idle";
+}
+
+// --- Patrons ------------------------------------------------------------
+
+function renderPatron() {
+  const host = $("#patron-panel");
+  if (!host) return;
+  if (!isPatronUnlocked()) {
+    const n = PATRON_REQUIRES_PRESTIGE;
+    const have = gameState.prestigeCount || 0;
+    host.innerHTML = `<div class="minigame-locked">\uD83D\uDD12 Take ${n} Cat Naps to choose a Patron (${have}/${n}).</div>`;
+    return;
+  }
+  const p = activePatron();
+  if (!p) {
+    host.innerHTML = `
+      <div class="patron-empty">
+        <p class="muted">You haven't pledged to a Patron yet. The first choice is free \u2014 switching later costs ${PATRON_SWAP_COST}\uD83C\uDF00.</p>
+        <button id="patron-open-picker" class="btn-primary">Choose a Patron</button>
+      </div>`;
+    return;
+  }
+  const summary = p.summary.map(s => `<li>${escapeHtml(s)}</li>`).join("");
+  const canSwap = (gameState.nineLives || 0) >= PATRON_SWAP_COST;
+  host.innerHTML = `
+    <div class="patron-card active" style="border-color:${p.color};">
+      <div class="patron-head">
+        <span class="patron-icon" style="color:${p.color};">${p.icon}</span>
+        <span class="patron-name">${escapeHtml(p.name)}</span>
+      </div>
+      <div class="patron-flavor muted">${escapeHtml(p.flavor)}</div>
+      <ul class="patron-summary">${summary}</ul>
+      <button id="patron-open-picker" class="patron-swap-btn" ${canSwap ? "" : "disabled"}>Swap \u00B7 ${PATRON_SWAP_COST}\uD83C\uDF00</button>
+    </div>`;
+}
+
+function openPatronPicker() {
+  const body = $("#modal-body");
+  if (!body) return;
+  const current = gameState.patronId;
+  const isSwap = !!current;
+  const cost = isSwap ? PATRON_SWAP_COST : 0;
+  const canAfford = !isSwap || (gameState.nineLives || 0) >= cost;
+
+  const cards = PATRONS.map(p => {
+    const isCurrent = p.id === current;
+    const summary = p.summary.map(s => `<li>${escapeHtml(s)}</li>`).join("");
+    const btnText = isCurrent ? "Current" : isSwap ? `Swap (${cost}\uD83C\uDF00)` : "Pledge";
+    const disabled = isCurrent || !canAfford;
+    return `<div class="patron-pick-card" style="border-color:${p.color};">
+      <div class="patron-head">
+        <span class="patron-icon" style="color:${p.color};">${p.icon}</span>
+        <span class="patron-name">${escapeHtml(p.name)}</span>
+      </div>
+      <div class="patron-flavor muted">${escapeHtml(p.flavor)}</div>
+      <ul class="patron-summary">${summary}</ul>
+      <button class="patron-pick-btn" data-patron-pick="${p.id}" ${disabled ? "disabled" : ""}>${btnText}</button>
+    </div>`;
+  }).join("");
+
+  body.innerHTML = `
+    <h3>\uD83C\uDFAD Choose a Patron</h3>
+    <p class="muted">Each Patron rewrites a slice of the game's math. ${isSwap ? `Swapping costs <strong>${cost}\uD83C\uDF00</strong>.` : "Your first pledge is free."}</p>
+    <div class="patron-picker-grid">${cards}</div>
+    <div class="modal-actions"><button data-modal-close>Cancel</button></div>`;
+  $("#modal").classList.add("open");
+}
+
 function renderChallenges() {
   const host = $("#challenges-panel");
   if (!host) return;
@@ -1469,6 +1670,22 @@ function tickActiveBars() {
   for (const el of document.querySelectorAll(".boss-desc .reset-timer")) {
     el.textContent = `\u23F1 ${formatDuration(weeklyMs)}`;
   }
+  // Research bar — tick smoothly without re-rendering the whole panel. On completion the
+  // next tick() call in main.js will re-render and flip the node to "done".
+  const rActive = gameState.research?.active;
+  const rPanel = document.querySelector("#research-panel");
+  if (rActive && rPanel) {
+    const fillEl = rPanel.querySelector(".research-bar-fill");
+    const etaEl  = rPanel.querySelector(".research-eta");
+    if (fillEl && etaEl) {
+      const total = rActive.completesAt - rActive.startedAt;
+      const remaining = Math.max(0, rActive.completesAt - now);
+      const pct = Math.max(0, Math.min(100, 100 * (1 - remaining / total)));
+      fillEl.style.width = pct + "%";
+      etaEl.textContent = remaining > 0 ? formatDuration(remaining) : "Finalizing\u2026";
+    }
+  }
+
   // Cat cards: show live mission ETA on the status line for cats currently out on a mission.
   // Stationed cats keep their station label (no countdown for an open-ended station post).
   for (const cat of gameState.cats) {
@@ -1549,6 +1766,7 @@ function renderPicker() {
     : margin >= -4 ? "risky"
     : "doomed";
 
+  p.abilityActivations = p.abilityActivations || {}; // { catId: abilityId }
   const catRows = idle.map(cat => {
     const selected = p.selected.has(cat.id);
     const disabled = !selected && p.selected.size >= partyMax();
@@ -1561,10 +1779,25 @@ function renderPicker() {
       return n + (item && item.affinity === p.neighborhoodId ? 1 : 0);
     }, 0);
     const matchTxt = matching ? ` · ${hood.icon}\u00D7${matching}` : "";
+
+    // Active ability chip — only shown when the cat is selected AND has charges.
+    const ability = catAbility(cat);
+    const charges = catAbilityAvailable(cat);
+    const max = catAbilityMaxCharges(cat);
+    const chipActive = !!p.abilityActivations[cat.id];
+    const showChip = selected && ability && charges > 0;
+    const abilityChip = showChip ? `
+      <button type="button" class="ability-chip ${chipActive ? "active" : ""}"
+        data-ability-toggle="${cat.id}"
+        title="${escapeHtml(ability.desc)} Charges: ${charges}/${max}">
+        ${ability.icon} ${escapeHtml(ability.name)}${chipActive ? " \u2713" : ""}
+      </button>` : "";
+
     return `<label class="picker-cat ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}">
       <input type="checkbox" data-pick-cat="${cat.id}" ${selected ? "checked" : ""} ${disabled ? "disabled" : ""}/>
       <span class="picker-name">${escapeHtml(cat.name)} · ${breed.classLabel} Lv${cat.level}</span>
       <span class="picker-score">${STAT_LABELS[mission.primaryChecks[0]]} ${eff[mission.primaryChecks[0]]} · ${STAT_LABELS[mission.primaryChecks[1]]} ${eff[mission.primaryChecks[1]]} (${checkTotal})${matchTxt}</span>
+      ${abilityChip}
     </label>`;
   }).join("");
 
@@ -1587,6 +1820,16 @@ function renderPicker() {
       <input type="checkbox" id="stray-checkbox" ${p.searchForStrays ? "checked" : ""} ${full ? "disabled" : ""}/>
       <span>Search for strays${full ? " (club is full)" : ""}${strayHint}</span>
     </label>`;
+
+  // Auto-repeat toggle — regular tier missions only. Commissioned/daily/boss missions are
+  // one-shots by design (they cost treaties, reset weekly, etc.) so there's no sensible
+  // re-fire. The toggle is purely opt-in and stored on the active record at start.
+  const canAutoRepeat = !p.isDaily && !p.isBoss && !p.isCommission;
+  const autoRepeatToggle = canAutoRepeat ? `
+    <label class="auto-repeat-toggle">
+      <input type="checkbox" id="auto-repeat-checkbox" ${p.autoRepeat ? "checked" : ""}/>
+      <span>Auto-repeat when this party returns <span class="stray-hint">\u2014 same party, same mission, stops if anyone goes missing</span></span>
+    </label>` : "";
 
   // Hazards breakdown
   const hazardRows = summary.effects.map(e => {
@@ -1678,6 +1921,7 @@ function renderPicker() {
     ${lastPartyLink}
     <div class="picker-list">${catRows || '<div class="empty-state">No idle cats available.</div>'}</div>
     ${strayToggle}
+    ${autoRepeatToggle}
     <div class="modal-actions">
       <button data-modal-close>Cancel</button>
       <button class="btn-primary" id="picker-start" ${selectedIds.length ? "" : "disabled"}>Send party</button>
@@ -1859,6 +2103,54 @@ function presentNextStray() {
 
 // --- Toasts --------------------------------------------------------------
 
+// Small floating notices for delightful moments. Shorter-lived than mission toasts.
+function showFlashToast(icon, title, subtitle, flavorClass) {
+  const host = $("#toast-stack");
+  if (!host) return;
+  const toast = document.createElement("div");
+  toast.className = `toast toast-flash ${flavorClass || ""}`;
+  toast.innerHTML = `
+    <div class="toast-head">
+      <span class="toast-outcome">${icon} ${escapeHtml(title)}</span>
+    </div>
+    ${subtitle ? `<div class="toast-body">${escapeHtml(subtitle)}</div>` : ""}`;
+  host.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 350);
+  }, 2800);
+}
+
+// Drain any flash events queued by game.js during a tick. Coalesces multi-level-ups on
+// the same cat into a single toast showing the final level.
+function presentQueuedFlashes() {
+  const q = gameState._flashQueue;
+  if (!Array.isArray(q) || !q.length) return;
+  // Coalesce level-ups per cat: keep only the highest level reached in this batch.
+  const levelUps = new Map();
+  const others = [];
+  for (const ev of q) {
+    if (ev.type === "levelUp") {
+      const prev = levelUps.get(ev.catId);
+      if (!prev || ev.level > prev.level) levelUps.set(ev.catId, ev);
+    } else {
+      others.push(ev);
+    }
+  }
+  for (const ev of levelUps.values()) {
+    showFlashToast("\u{1F38A}", `${ev.name} \u2192 Lv ${ev.level}`, null, "toast-levelup");
+  }
+  for (const ev of others) {
+    if (ev.type === "legendary") {
+      showFlashToast("\u2728", "Legendary drop!", ev.itemName, "toast-legendary");
+    } else if (ev.type === "research") {
+      showFlashToast("\uD83D\uDCDA", "Research complete", ev.name, "toast-research");
+    }
+  }
+  gameState._flashQueue = [];
+}
+
 function showMissionToast(r) {
   const host = $("#toast-stack");
   if (!host) return;
@@ -1913,7 +2205,9 @@ const AUTO_OPEN_RULES = [
   { id: "stars-details",       trigger: () => isStargazingUnlocked() },
   { id: "fishing-details",     trigger: () => isFishingUnlocked() },
   { id: "garden-details",      trigger: () => isGardenUnlocked() },
-  { id: "lounge-details",      trigger: () => (gameState.loungeCats || []).length > 0 }
+  { id: "lounge-details",      trigger: () => (gameState.loungeCats || []).length > 0 },
+  { id: "patron-details",      trigger: () => isPatronUnlocked() },
+  { id: "research-details",    trigger: () => isResearchUnlocked() }
 ];
 
 function autoOpenPanels() {
@@ -1940,6 +2234,8 @@ function renderAll() {
   renderStars();
   renderFishing();
   renderGarden();
+  renderPatron();
+  renderResearch();
   renderChallenges();
   renderMastery();
   renderBestiary();
@@ -2081,13 +2377,36 @@ function wireEvents(onMutation) {
       return;
     }
 
+    // Ability chip toggle on a picker cat row.
+    const abilityBtn = t.closest("[data-ability-toggle]");
+    if (abilityBtn && !abilityBtn.disabled) {
+      const p = uiState.picker;
+      if (!p) return;
+      const catId = abilityBtn.dataset.abilityToggle;
+      const cat = findCat(catId);
+      const ability = catAbility(cat);
+      if (!ability) return;
+      p.abilityActivations = p.abilityActivations || {};
+      if (p.abilityActivations[catId]) delete p.abilityActivations[catId];
+      else p.abilityActivations[catId] = ability.id;
+      renderPicker();
+      return;
+    }
+
     // Mission picker: Start. Synthetic missions (daily/boss/commission) pass the whole
     // mission object instead of (hood,tier) so their modifier-applied fields take effect.
+    // autoRepeat is only meaningful for regular tier missions (one-shots can't re-fire).
     if (t.id === "picker-start" && !t.disabled) {
       const p = uiState.picker;
+      // Only pass abilities for cats actually in the selected party.
+      const catAbilities = {};
+      for (const id of p.selected) {
+        if (p.abilityActivations?.[id]) catAbilities[id] = p.abilityActivations[id];
+      }
+      const opts = { autoRepeat: !!p.autoRepeat, catAbilities };
       const res = (p.isDaily || p.isBoss || p.isCommission)
-        ? startMission(Array.from(p.selected), p.mission, p.searchForStrays)
-        : startMission(Array.from(p.selected), p.neighborhoodId, p.tier, p.searchForStrays);
+        ? startMission(Array.from(p.selected), p.mission, p.searchForStrays, opts)
+        : startMission(Array.from(p.selected), p.neighborhoodId, p.tier, p.searchForStrays, opts);
       if (!res.ok) { alert(res.reason); return; }
       closeModal();
       onMutation();
@@ -2249,6 +2568,35 @@ function wireEvents(onMutation) {
     if (harvBtn) {
       const r = harvestPlot(parseInt(harvBtn.dataset.harvestPlot, 10));
       if (!r.ok) alert(r.reason); else onMutation();
+      return;
+    }
+
+    // Research: start node / cancel active.
+    const researchStartBtn = t.closest("[data-research-start]");
+    if (researchStartBtn && !researchStartBtn.disabled) {
+      const r = startResearch(researchStartBtn.dataset.researchStart);
+      if (!r.ok) alert(r.reason); else onMutation();
+      return;
+    }
+    if (t.id === "research-cancel") {
+      if (confirm("Cancel active research? Half of the cost is refunded.")) {
+        const r = cancelResearch();
+        if (!r.ok) alert(r.reason); else onMutation();
+      }
+      return;
+    }
+
+    // Patron: open picker + pledge.
+    if (t.id === "patron-open-picker") {
+      openPatronPicker();
+      return;
+    }
+    const patronPickBtn = t.closest("[data-patron-pick]");
+    if (patronPickBtn && !patronPickBtn.disabled) {
+      const r = choosePatron(patronPickBtn.dataset.patronPick);
+      if (!r.ok) { alert(r.reason); return; }
+      closeModal();
+      onMutation();
       return;
     }
 
@@ -2471,6 +2819,11 @@ function wireEvents(onMutation) {
     if (t.id === "stray-checkbox") {
       const p = uiState.picker;
       if (p) p.searchForStrays = t.checked;
+      return;
+    }
+    if (t.id === "auto-repeat-checkbox") {
+      const p = uiState.picker;
+      if (p) p.autoRepeat = t.checked;
       return;
     }
     if (t.id === "garden-autoplant") {

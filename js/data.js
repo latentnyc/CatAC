@@ -539,6 +539,24 @@ const SYNERGIES = [
   }
 ];
 
+// Active class abilities — one per class, keyed by breed id. Cats have 1 + veteranLevel
+// charges per run, consumed on use. Activation is opt-in in the mission picker; the effect
+// is applied at mission start (duration changes) or resolve (everything else).
+const ACTIVE_ABILITIES = {
+  fighter: { id: "bastion",     name: "Bastion",      icon: "\uD83D\uDEE1\uFE0F",
+    desc: "+5 mitigation on this mission.", effect: { missionMit: 5 } },
+  mage:    { id: "arcaneSight", name: "Arcane Sight", icon: "\uD83D\uDD2E",
+    desc: "+50% loot chance on this mission.", effect: { lootMul: 1.5 } },
+  rogue:   { id: "dash",        name: "Dash",         icon: "\uD83D\uDCA8",
+    desc: "\u221230% mission duration.", effect: { durationMul: 0.7 } },
+  cleric:  { id: "sanctuary",   name: "Sanctuary",    icon: "\u271D\uFE0F",
+    desc: "Failure floor cap raised to 1.00 (no reward penalty on fail).", effect: { floorCapOverride: 1.0 } },
+  bard:    { id: "aria",        name: "Aria",         icon: "\uD83C\uDFB6",
+    desc: "+50% XP on this mission.", effect: { xpMul: 1.5 } },
+  ranger:  { id: "hunt",        name: "Hunt",         icon: "\uD83C\uDFF9",
+    desc: "+5 rarity shift on this mission.", effect: { rarityShift: 5 } }
+};
+
 // Talent Trees — per-class 5-node linear trees. Cats earn 1 talent point at levels 5, 10, 15,
 // 20, 25 (five total, enough to max one tree by level cap). Each node has ONE shape:
 //   - stat: { stat: "str", amount: 2 } — applied immediately on pick (permanent base-stat bump)
@@ -594,6 +612,135 @@ const TALENT_TREES = {
     { id: "apex",       name: "Apex Predator",   desc: "Each legendary drop on your missions also grants +1\uD83C\uDF80.", missionBonus: { apexPredator: true } }
   ]
 };
+
+// Research Tree — passive progression paid with 🐟 + real time. Each node takes a duration,
+// costs resources, and grants a permanent effect on completion. Only ONE node researches at
+// a time. Completed nodes persist across prestige. Unlocks at Club Level 5.
+//
+// Effect shape documented at bottom — keep each node's effect field to known keys so the
+// researchTotals() aggregator can pick them up without special cases.
+const RESEARCH_UNLOCK_CLUB_LEVEL = 5;
+const RESEARCH_NODES = [
+  // ---- Tier 1: Foundations (no prereqs) ----
+  { id: "literacy",  name: "Basic Literacy",    icon: "\uD83D\uDCD6",
+    desc: "Cats learn to read. +3% mission XP permanently.",
+    tier: 1, prereq: [], cost: { fishes: 30 },    duration:      10 * 60 * 1000,
+    effect: { xpMul: 1.03 } },
+  { id: "carto",     name: "Cartography",       icon: "\uD83D\uDDFA\uFE0F",
+    desc: "Better maps mean better commissions. +3% mission gold.",
+    tier: 1, prereq: [], cost: { fishes: 50 },    duration:      20 * 60 * 1000,
+    effect: { goldMul: 1.03 } },
+  { id: "herbalism", name: "Herbalism",         icon: "\uD83C\uDF31",
+    desc: "Herbs rewarded properly. Garden harvests yield double quantity.",
+    tier: 1, prereq: [], cost: { fishes: 80 },    duration:      30 * 60 * 1000,
+    effect: { gardenQuantityMul: 2 } },
+
+  // ---- Tier 2: Intermediate ----
+  { id: "pack",      name: "Pack Behavior",     icon: "\uD83D\uDC3E",
+    desc: "Studied group dynamics. +1 party score per cat in the party.",
+    tier: 2, prereq: ["literacy"], cost: { fishes: 120 }, duration: 60 * 60 * 1000,
+    effect: { scorePerCat: 1 } },
+  { id: "booking",   name: "Bookkeeping",       icon: "\uD83D\uDCD2",
+    desc: "Meticulous ledgers. +3% mission gold (stacks).",
+    tier: 2, prereq: ["carto"], cost: { fishes: 180 }, duration: 90 * 60 * 1000,
+    effect: { goldMul: 1.03 } },
+  { id: "naming",    name: "Naming Theory",     icon: "\uD83D\uDCDD",
+    desc: "Knowing one's name gives power. New strays start at Level 2.",
+    tier: 2, prereq: ["herbalism"], cost: { fishes: 200 }, duration: 2 * 60 * 60 * 1000,
+    effect: { strayStartLevel: 2 } },
+  { id: "stars",     name: "Constellation Study", icon: "\u2728",
+    desc: "The sky favors the attentive. +1 rarity shift on every mission.",
+    tier: 2, prereq: ["literacy"], cost: { fishes: 220, treaties: 1 }, duration: 2 * 60 * 60 * 1000,
+    effect: { rarityShift: 1 } },
+
+  // ---- Tier 3: Advanced ----
+  { id: "logistics", name: "Efficient Logistics", icon: "\u26A1",
+    desc: "No wasted paws. \u22125% mission duration on all runs.",
+    tier: 3, prereq: ["pack"], cost: { fishes: 350 }, duration: 3 * 60 * 60 * 1000,
+    effect: { durationMul: 0.95 } },
+  { id: "archaeo",   name: "Archaeology",       icon: "\u{1F3FA}",
+    desc: "Old bones tell stories. +2% global loot chance.",
+    tier: 3, prereq: ["booking", "naming"], cost: { fishes: 500 }, duration: 4 * 60 * 60 * 1000,
+    effect: { lootPct: 0.02 } },
+  { id: "alchemy",   name: "Alchemy",           icon: "\u269B\uFE0F",
+    desc: "Brews are bigger. Stray consumables (Catnip Pouch, Tuna Lure) give double bonus.",
+    tier: 3, prereq: ["herbalism"], cost: { fishes: 600, treaties: 2 }, duration: 5 * 60 * 60 * 1000,
+    effect: { strayConsumableMul: 2 } },
+  { id: "esoterica", name: "Esoterica",         icon: "\uD83D\uDD2E",
+    desc: "Hidden patterns revealed. +3% global loot chance.",
+    tier: 3, prereq: ["stars"], cost: { fishes: 800 }, duration: 6 * 60 * 60 * 1000,
+    effect: { lootPct: 0.03 } },
+
+  // ---- Tier 4: Grand ----
+  { id: "grand",     name: "Grand Workings",    icon: "\u{1F3DB}\uFE0F",
+    desc: "The club hums with learned purpose. +1 mitigation on every mission.",
+    tier: 4, prereq: ["logistics", "archaeo"], cost: { fishes: 1200, treaties: 3 }, duration: 10 * 60 * 60 * 1000,
+    effect: { mitFlat: 1 } },
+  { id: "tongues",   name: "Ancient Tongues",   icon: "\uD83D\uDDBD\uFE0F",
+    desc: "Cats whisper older words. New strays gain +1 to every base stat.",
+    tier: 4, prereq: ["alchemy", "esoterica"], cost: { fishes: 1500, treaties: 5 }, duration: 12 * 60 * 60 * 1000,
+    effect: { strayStatBonus: 1 } },
+  { id: "pinnacle",  name: "Pinnacle of Cat Thought", icon: "\uD83D\uDC51",
+    desc: "A capstone of theory: +10% XP, +5% gold, +5% loot chance.",
+    tier: 4, prereq: ["grand", "tongues"], cost: { fishes: 3000, treaties: 10 }, duration: 24 * 60 * 60 * 1000,
+    effect: { xpMul: 1.10, goldMul: 1.05, lootPct: 0.05 } }
+];
+
+// Effect keys consumed by researchTotals() in game.js:
+//   xpMul, goldMul, durationMul   — multiplicative (default 1.0)
+//   lootPct, mitFlat, rarityShift, scorePerCat — additive (default 0)
+//   strayStartLevel               — max of all completions (default 1)
+//   strayStatBonus, strayConsumableMul, gardenQuantityMul — additive/flat
+
+// Patrons — meta-factions picked at prestige 3+. Each warps the whole game's math in a
+// distinct direction. First pick is free; swapping costs PATRON_SWAP_COST Nine Lives.
+// Effects are read in partyMitigation, resolveMission, effectiveShopCost, stray roll, etc.,
+// via the accessors in game.js. Keep each patron's net power roughly equal — trades, not buffs.
+const PATRON_REQUIRES_PRESTIGE = 3;
+const PATRON_SWAP_COST = 10;
+const PATRONS = [
+  {
+    id: "baker", name: "The Baker", icon: "\uD83E\uDD50", color: "#e89660",
+    flavor: "Warmth is the only answer. Bread made with love, and love made with bread.",
+    summary: [
+      "+100% mitigation from Bakery-affinity gear",
+      "\u221250% mitigation from Lake-affinity gear",
+      "\u221210% shop consumable cost"
+    ],
+    effects: {
+      mitMulByHood: { bakery: 2.0, lake: 0.5 },
+      shopDiscount: 0.10
+    }
+  },
+  {
+    id: "librarian", name: "The Librarian", icon: "\uD83D\uDCDA", color: "#7c5cff",
+    flavor: "Knowledge is the better coin. The ledger forgives nothing, but it forgets less.",
+    summary: [
+      "+25% mission XP",
+      "\u221215% mission gold",
+      "+15% chance for an extra affix on loot rolls"
+    ],
+    effects: {
+      xpMul: 1.25,
+      goldMul: 0.85,
+      extraAffixChance: 0.15
+    }
+  },
+  {
+    id: "nightMarket", name: "The Night Market", icon: "\uD83C\uDF19", color: "#b890d1",
+    flavor: "Bargains for those who know where to look. Quiet meetings behind quiet doors.",
+    summary: [
+      "\u221250% shop consumable cost (stacks with Merchant)",
+      "+5% base stray-offer chance",
+      "Daily & Weekly boss gold/fish/treaty rewards halved"
+    ],
+    effects: {
+      shopDiscount: 0.50,
+      strayPct: 0.05,
+      bossDailyCurrencyMul: 0.5
+    }
+  }
+];
 
 // Challenges — opt-in restricted runs. Complete the goal count of successful missions
 // under the restriction to stack a "Boon" that permanently adds to partyBonuses.

@@ -1153,6 +1153,23 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
 .toast-fail    { border-color: var(--danger); }
 .toast-fail    .toast-outcome { color: var(--danger); }
 
+/* Short flash toasts for small delights (level-ups, legendary drops). */
+.toast-flash { padding: 8px 12px; min-width: 180px; }
+.toast-flash .toast-body { font-size: 11px; margin-top: 2px; }
+.toast-levelup  { border-color: #7c5cff; background: linear-gradient(135deg, #1c1a30 0%, #2a2548 100%); }
+.toast-levelup  .toast-outcome { color: #c4b8ff; }
+.toast-legendary { border-color: #c79a3a; background: linear-gradient(135deg, #2a2214 0%, #3a2e1a 100%); }
+.toast-legendary .toast-outcome { color: #e6b85e; font-weight: 700; }
+
+/* Auto-repeat toggle in mission picker — matches the stray-toggle layout. */
+.auto-repeat-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 0; font-size: 12px; cursor: pointer;
+  border-top: 1px dashed #2a2a2e; margin-top: 2px;
+}
+.auto-repeat-toggle input { cursor: pointer; }
+.auto-repeat-toggle .stray-hint { font-size: 11px; color: #888; }
+
 /* --- Responsive ---------------------------------------------------- */
 
 @media (max-width: 1080px) {
@@ -1183,12 +1200,16 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
   .hood-name { font-size: 10px; }
   /* Mission cards: tighten padding at narrow widths */
   .mission-row { padding: 8px 10px; }
-  /* Modal body shouldn't overflow on tiny phones */
-  #modal-box { max-width: 92vw; padding: 16px; }
+  /* Modal body shouldn't overflow on tiny phones — the default 420px min-width blows
+     past iPhone-width (390px). Drop it here and squeeze padding. */
+  #modal-box { min-width: 0; max-width: 94vw; width: 94vw; padding: 14px; }
   .picker-list { max-height: 40vh; }
   .welcome-steps { padding-left: 16px; font-size: 12px; }
   /* Settings textarea should stay within the panel */
   #settings-panel .save-textarea { font-size: 9px; }
+  /* Commission modifier rows get cramped; collapse name above desc */
+  .commission-mod { grid-template-columns: 20px 1fr auto; row-gap: 2px; }
+  .commission-mod-desc { grid-column: 2 / 4; }
 }
 
 /* ============================================================
@@ -1366,6 +1387,140 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
 .nap-cat-row.selected { border-color: #c79a3a; background: #2a2414; }
 .nap-cat-row.disabled { opacity: 0.45; cursor: not-allowed; }
 .nap-cat-row input[type="checkbox"] { margin-right: 6px; vertical-align: -2px; }
+
+/* --- Research panel --- */
+#research-panel .research-summary { font-size: 11px; margin: 2px 0 8px; }
+#research-panel .research-active {
+  padding: 10px 12px; margin-bottom: 10px; border-radius: 8px;
+  background: linear-gradient(135deg, #1e1a2a 0%, #2a2440 100%);
+  border: 1px solid #7c5cff;
+}
+#research-panel .research-active-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+#research-panel .research-active-head .research-icon { font-size: 20px; }
+#research-panel .research-active-head .research-name { font-weight: 600; flex: 1; }
+#research-panel .research-cancel-btn {
+  padding: 3px 10px; font-size: 11px; background: #3a2a2a; color: #eee;
+  border: 1px solid #5a3a3a; border-radius: 4px; cursor: pointer;
+}
+#research-panel .research-cancel-btn:hover { background: #5a3a3a; }
+#research-panel .research-bar {
+  width: 100%; height: 6px; background: #1a1a22; border-radius: 3px;
+  overflow: hidden; margin-bottom: 4px;
+}
+#research-panel .research-bar-fill {
+  height: 100%; background: linear-gradient(90deg, #7c5cff, #a890ff);
+  transition: width 0.2s linear;
+}
+#research-panel .research-eta { font-size: 11px; }
+
+#research-panel .research-tier { margin: 10px 0 4px; }
+#research-panel .research-tier-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed #2a2a2e;
+}
+#research-panel .research-node {
+  display: grid; grid-template-columns: 28px 1fr auto;
+  gap: 8px; align-items: center;
+  padding: 6px 8px; margin-bottom: 4px;
+  background: #1f1f22; border: 1px solid #2a2a2e; border-radius: 5px;
+  font-size: 12px;
+}
+#research-panel .research-node-done {
+  border-color: #3b9a63; opacity: 0.7; background: #1a2a1f;
+}
+#research-panel .research-node-done .research-node-name { color: #6fd491; }
+#research-panel .research-node-active {
+  border-color: #7c5cff; background: #1e1a2a;
+}
+#research-panel .research-node-locked { opacity: 0.45; }
+#research-panel .research-node-icon { font-size: 18px; text-align: center; }
+#research-panel .research-node-name { font-weight: 600; }
+#research-panel .research-node-desc { font-size: 11px; margin-top: 2px; }
+#research-panel .research-start-btn {
+  padding: 4px 10px; background: #2a3e5a; color: #eee;
+  border: 1px solid #3a5a8a; border-radius: 4px; cursor: pointer;
+  font-size: 11px; white-space: nowrap;
+}
+#research-panel .research-start-btn:hover:not(:disabled) { background: #3a5a8a; }
+#research-panel .research-start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#research-panel .research-done-pill,
+#research-panel .research-active-pill,
+#research-panel .research-lock-pill {
+  font-size: 10px; padding: 3px 8px; border-radius: 10px; white-space: nowrap;
+}
+#research-panel .research-done-pill   { background: #1a2a1f; color: #6fd491; border: 1px solid #3b9a63; }
+#research-panel .research-active-pill { background: #1e1a2a; color: #c4b8ff; border: 1px solid #7c5cff; }
+#research-panel .research-lock-pill   { background: #1a1a22; color: #666; border: 1px solid #2a2a2e; }
+
+.toast-research {
+  border-color: #7c5cff;
+  background: linear-gradient(135deg, #1e1a2a 0%, #2a2440 100%);
+}
+.toast-research .toast-outcome { color: #c4b8ff; }
+
+/* --- Patron panel + picker modal --- */
+#patron-panel .patron-empty { padding: 8px 0; }
+#patron-panel .patron-card {
+  padding: 10px 12px;
+  border: 1px solid; border-radius: 8px;
+  background: linear-gradient(135deg, #1a1a24 0%, #24242e 100%);
+}
+.patron-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.patron-icon { font-size: 22px; }
+.patron-name { font-weight: 600; font-size: 14px; }
+.patron-flavor { font-size: 11px; font-style: italic; margin-bottom: 6px; }
+.patron-summary {
+  margin: 6px 0 8px 0; padding-left: 18px; font-size: 12px;
+}
+.patron-summary li { margin-bottom: 2px; }
+#patron-panel .patron-swap-btn {
+  padding: 5px 10px; background: #2a2a2e; color: #eee;
+  border: 1px solid #3a3a3e; border-radius: 4px; cursor: pointer; font-size: 11px;
+}
+#patron-panel .patron-swap-btn:hover:not(:disabled) { background: #3a3a3e; }
+#patron-panel .patron-swap-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.patron-picker-grid {
+  display: flex; flex-direction: column; gap: 10px; margin: 12px 0;
+}
+.patron-pick-card {
+  padding: 12px; border: 1px solid; border-radius: 8px;
+  background: #1a1a24;
+}
+.patron-pick-btn {
+  padding: 6px 12px; background: #2a2a2e; color: #eee;
+  border: 1px solid #3a3a3e; border-radius: 4px; cursor: pointer;
+  font-size: 12px; font-weight: 600; margin-top: 4px;
+}
+.patron-pick-btn:hover:not(:disabled) { background: #3a3a3e; }
+.patron-pick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* --- Active ability chip in mission picker --- */
+.ability-chip {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 3px;
+  padding: 3px 8px;
+  background: #2a2544;
+  color: #c4b8ff;
+  border: 1px solid #4a3f78;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+.ability-chip:hover { background: #3a3558; }
+.ability-chip.active {
+  background: linear-gradient(180deg, #6a4ac8 0%, #3a2e68 100%);
+  color: #fff;
+  border-color: #8a6ae8;
+  box-shadow: 0 0 4px rgba(124, 92, 255, 0.6);
+}
 
 /* --- Talent tree UI --- */
 .talent-btn {
