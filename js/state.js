@@ -207,8 +207,13 @@ function loadState() {
   }
 }
 
+// Skip flag used by "Start Fresh" so the beforeunload listener doesn't resurrect the save
+// we just deleted. Also short-circuits the debounced saver.
+let _saveSuspended = false;
+function suspendSaves() { _saveSuspended = true; if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } }
+
 function saveStateNow() {
-  if (!gameState) return;
+  if (!gameState || _saveSuspended) return;
   gameState.lastSaved = Date.now();
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
@@ -219,7 +224,7 @@ function saveStateNow() {
 }
 
 function requestSave() {
-  if (saveTimer) return;
+  if (saveTimer || _saveSuspended) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
     saveStateNow();

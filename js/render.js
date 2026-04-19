@@ -2321,14 +2321,21 @@ function wireEvents(onMutation) {
         alert("Could not write save: " + e.message);
         return;
       }
+      // Suspend saves so beforeunload doesn't overwrite the freshly-imported payload with
+      // the current in-memory gameState.
+      suspendSaves();
       location.reload();
       return;
     }
 
     // Emergency reset — two confirms, then wipe localStorage and reload.
+    // Suspend saves BEFORE removing the key: otherwise beforeunload (or the debounced
+    // saver) fires during the reload and writes the in-memory gameState right back,
+    // un-doing the reset. suspendSaves() also cancels any pending setTimeout.
     if (t.id === "save-reset") {
       if (!confirm("Start fresh? This permanently deletes your entire save and cannot be undone.")) return;
       if (!confirm("Really wipe everything? Cats, prestige progress, bestiary, challenge boons \u2014 ALL of it.")) return;
+      suspendSaves();
       localStorage.removeItem(SAVE_KEY);
       location.reload();
       return;
