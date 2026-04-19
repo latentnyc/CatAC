@@ -1643,7 +1643,11 @@ function generateItem(rarity, stats) {
   const bonus = {};
   for (const s of affixStats) bonus[s] = tier.bonusValue;
 
-  const affinity = choice(NEIGHBORHOOD_IDS);
+  // Gear affinity rolls only among currently-unlocked neighborhoods. This keeps early-game
+  // gear immediately usable (no stray Subway/Dreaming items sitting in inventory with no
+  // accessible hood to mitigate on) and quietly grows the pool as the player unlocks more.
+  const affinityPool = unlockedNeighborhoodIds();
+  const affinity = choice(affinityPool.length ? affinityPool : NEIGHBORHOOD_IDS);
   const suffix = choice(STAT_SUFFIXES[affixStats[0]]);
   const name = `${adjective} ${typeName} ${suffix}`;
 
@@ -1941,8 +1945,10 @@ function buyElementReroll(itemId) {
   if (!loot) return { ok: false, reason: "No such item." };
   if (!canAfford(shopItem.cost)) return { ok: false, reason: "Not enough fishes." };
   payCost(shopItem.cost);
-  const options = NEIGHBORHOOD_IDS.filter(id => id !== loot.affinity);
-  loot.affinity = choice(options);
+  // Reroll within unlocked hoods only, and never to the same affinity — gives the player
+  // a guaranteed swap without the Subway/Dreaming "useless tag" trap before they unlock.
+  const options = unlockedNeighborhoodIds().filter(id => id !== loot.affinity);
+  loot.affinity = choice(options.length ? options : NEIGHBORHOOD_IDS.filter(id => id !== loot.affinity));
   const hood = NEIGHBORHOODS[loot.affinity];
   logEvent(`${loot.name} retagged to ${hood.icon} ${hood.name}.`);
   requestSave();
@@ -2157,6 +2163,13 @@ function prestige(keepCatIdOrIds) {
 
   gameState = fresh;
   checkAchievements();
+  // Fanfare for any neighborhood that opens AT this prestige count (generic over all hoods
+  // with requiresPrestige, so Dreaming at 3 and Subway at 1 both get welcomed).
+  for (const hood of Object.values(NEIGHBORHOODS)) {
+    if (hood.requiresPrestige === persistents.prestigeCount) {
+      logEvent(`${hood.icon} ${hood.name} opens its doors. ${hood.flavor}`);
+    }
+  }
   saveStateNow();
   return { ok: true, earned, keptCount: keptCats.length };
 }

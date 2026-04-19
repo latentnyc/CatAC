@@ -196,7 +196,10 @@ function formatDuration(ms) {
   if (min < 60) return sec ? `${min}m ${sec}s` : `${min}m`;
   const hr = Math.floor(min / 60);
   const rm = min % 60;
-  return rm ? `${hr}h ${rm}m` : `${hr}h`;
+  if (hr < 24) return rm ? `${hr}h ${rm}m` : `${hr}h`;
+  const d = Math.floor(hr / 24);
+  const rh = hr % 24;
+  return rh ? `${d}d ${rh}h` : `${d}d`;
 }
 
 // --- Top bar -------------------------------------------------------------
@@ -1455,6 +1458,28 @@ function tickActiveBars() {
     const pct = Math.max(0, Math.min(100, 100 * (1 - remaining / total)));
     barFill.style.width = pct + "%";
     etaEl2.textContent = remaining <= 0 ? "Ready to harvest!" : formatMs(remaining);
+  }
+  // Live reset chips on daily/boss cards — these were static on render; now they tick.
+  // Rendered text updates are cheap even at 60fps; only the visible cards get touched.
+  const dailyMs = msUntilDailyReset(now);
+  for (const el of document.querySelectorAll(".daily-meta .reset-timer")) {
+    el.textContent = `\u23F1 ${formatDuration(dailyMs)}`;
+  }
+  const weeklyMs = msUntilWeeklyReset(now);
+  for (const el of document.querySelectorAll(".boss-desc .reset-timer")) {
+    el.textContent = `\u23F1 ${formatDuration(weeklyMs)}`;
+  }
+  // Cat cards: show live mission ETA on the status line for cats currently out on a mission.
+  // Stationed cats keep their station label (no countdown for an open-ended station post).
+  for (const cat of gameState.cats) {
+    if (cat.status !== "mission" || !cat.missionId) continue;
+    const m = gameState.missions.find(x => x.id === cat.missionId);
+    if (!m) continue;
+    const card = document.querySelector(`.cat-card[data-cat-id="${cat.id}"]`);
+    const statusEl = card?.querySelector(".cat-status");
+    if (!statusEl) continue;
+    const remaining = Math.max(0, (m.startedAt + m.durationMs) - now);
+    statusEl.textContent = remaining ? `\u2694\uFE0F ${formatDuration(remaining)}` : "\u2694\uFE0F returning\u2026";
   }
 }
 

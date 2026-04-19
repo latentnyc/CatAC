@@ -197,6 +197,20 @@ const NEIGHBORHOODS = {
       { id: "cook",     name: "The Head Cook",   severity: 10, desc: "A broom has your name on it." }
     ]
   },
+  subway: {
+    id: "subway", name: "The Subway", element: "metal", icon: "\u{1F687}",
+    color: "#8a8a9e",
+    primaryChecks: ["dex", "con"],
+    flavor: "Tunnels, third-rail arcs, strangers in long coats.",
+    requiresPrestige: 1,
+    effects: [
+      { id: "tunnelwind", name: "Tunnel Wind",      severity: 3,  desc: "Hot gusts push paws off-balance." },
+      { id: "crowds",     name: "Rush Hour Crowds", severity: 4,  desc: "Commuters step without looking down." },
+      { id: "thirdrail",  name: "Third Rail",       severity: 6,  desc: "The hum is deadly and close." },
+      { id: "conductor",  name: "Lost Conductor",   severity: 8,  desc: "Someone calls from a train that isn't here." },
+      { id: "deepline",   name: "The Deep Line",    severity: 10, desc: "Not every station is on the map." }
+    ]
+  },
   dreaming: {
     id: "dreaming", name: "The Dreaming", element: "spirit", icon: "\u{1F319}\u{2728}",
     color: "#b890d1",
