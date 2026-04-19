@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 100" width="420" height="100" fill="none">
+  <defs>
+    <linearGradient id="wm" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd866"></stop>
+      <stop offset="1" stop-color="#ff9f68"></stop>
+    </linearGradient>
+    
+  </defs>
+  <text class="wordmark" x="10" y="54">Cat Adventure</text>
+  <text class="wordmark" x="10" y="92">Club</text>
+  <text class="tag" x="155" y="92">— est. meow</text>
+</svg>

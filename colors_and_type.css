@@ -1,0 +1,224 @@
+/* =============================================================
+   Cat Adventure Club — Colors & Type Tokens
+   Source of truth: CatGame/style.css
+   ============================================================= */
+
+:root {
+  /* ---- Surfaces ---- */
+  --cac-bg:              #14161c;  /* page */
+  --cac-bg-panel:        #1c1f29;  /* primary panels / columns */
+  --cac-bg-panel-2:      #242836;  /* cards raised above panel */
+  --cac-bg-inset:        #12141c;  /* wells (log, stat cells, xp track) */
+
+  /* ---- Borders ---- */
+  --cac-border:          #2e3343;
+  --cac-border-strong:   #3a4057;
+  --cac-border-inset:    #222632;  /* darker well borders */
+
+  /* ---- Text ---- */
+  --cac-text:            #e6e6ea;
+  --cac-text-dim:        #a0a4b4;
+  --cac-text-muted:      #70748a;
+
+  /* ---- Accent (hero gold) ---- */
+  --cac-accent:          #ffd866;
+  --cac-accent-dim:      #c9a94a;
+  --cac-accent-warm:     #ff9f68;  /* end of brand gradient */
+  --cac-accent-ink:      #2a2a2a;  /* text color on gold fills */
+
+  /* ---- Semantic ---- */
+  --cac-success:         #4caf7d;
+  --cac-success-soft:    #82e0a1;  /* crit / favorable verdict */
+  --cac-success-ink:     #0e1a13;
+  --cac-danger:          #d96c6c;
+
+  /* ---- Rarity (MMO scale) ---- */
+  --cac-rarity-common:     #B8B8B8;
+  --cac-rarity-rare:       #4AA3FF;
+  --cac-rarity-epic:       #B04AFF;
+  --cac-rarity-legendary:  #FFB347;
+
+  /* ---- Neighborhoods (element keyed) ---- */
+  --cac-hood-park:      #6fb86b;  /* earth / green */
+  --cac-hood-lake:      #57a8d3;  /* water / blue */
+  --cac-hood-rooftops:  #b89ce8;  /* air   / lavender */
+  --cac-hood-bakery:    #e89660;  /* fire  / coral */
+
+  /* ---- Support tints (chips, ribbons) ---- */
+  --cac-chip-mit:      #d7ae8a;  /* scrapper passive */
+  --cac-chip-loot:     #c9a9f5;  /* mystic passive */
+  --cac-chip-speed:    #7cc0e0;  /* prowler passive */
+  --cac-chip-floor:    #8cd087;  /* purrist passive */
+  --cac-chip-nineli:   #d7c0f2;  /* nine-lives purple */
+  --cac-nose-pink:     #D97A8F;
+
+  /* ---- XP / progress gradient stops ---- */
+  --cac-xp-from:       #6fc38a;
+  --cac-xp-to:         #a8dc6f;
+
+  /* ---- Scrims & shadows ---- */
+  --cac-scrim:         rgba(10, 12, 18, 0.7);
+  --cac-shadow-modal:  0 20px 60px rgba(0, 0, 0, 0.5);
+  --cac-shadow-toast:  0 10px 30px rgba(0, 0, 0, 0.5);
+  --cac-glow-legendary: 0 0 12px rgba(255, 179, 71, 0.25);
+
+  /* ---- Radii ---- */
+  --cac-radius-xs: 4px;   /* stat cells, tiny buttons */
+  --cac-radius-sm: 5px;   /* action buttons */
+  --cac-radius-md: 6px;   /* inventory items, shop rows */
+  --cac-radius-lg: 8px;   /* cards, tabs, cat cards */
+  --cac-radius-xl: 10px;  /* columns, modals */
+  --cac-radius-pill: 12px;
+
+  /* ---- Spacing (4px rhythm) ---- */
+  --cac-space-1: 2px;
+  --cac-space-2: 4px;
+  --cac-space-3: 6px;
+  --cac-space-4: 8px;
+  --cac-space-5: 10px;
+  --cac-space-6: 12px;
+  --cac-space-7: 14px;
+  --cac-space-8: 16px;
+  --cac-space-10: 20px;
+
+  /* ---- Typography: base family ---- */
+  --cac-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --cac-font-serif: ui-serif, Georgia, "Times New Roman", serif; /* used only for class-badge glyphs */
+  --cac-font-display: 'Fraunces', 'Recoleta', Georgia, serif; /* wordmark, hero headings, modal H3 upgrade */
+
+  /* ---- Type sizes ---- */
+  --cac-size-9:   9px;   /* micro state badges */
+  --cac-size-10: 10px;   /* stat cells, meta */
+  --cac-size-11: 11px;   /* dense rows */
+  --cac-size-12: 12px;   /* default body-2 / buttons */
+  --cac-size-13: 13px;   /* H2 caps labels */
+  --cac-size-14: 14px;   /* body */
+  --cac-size-16: 16px;   /* H3 modal */
+  --cac-size-18: 18px;   /* brand title */
+  --cac-size-20: 20px;   /* brand mark */
+
+  /* ---- Weights ---- */
+  --cac-weight-regular:  400;
+  --cac-weight-semibold: 600;
+  --cac-weight-bold:     700;
+
+  /* ---- Line height ---- */
+  --cac-line-tight: 1.2;
+  --cac-line-base:  1.45;
+
+  /* ---- Gradients ---- */
+  --cac-grad-brand:  linear-gradient(90deg, var(--cac-accent), var(--cac-accent-warm));
+  --cac-grad-topbar: linear-gradient(180deg, #1e2230 0%, #181b25 100%);
+  --cac-grad-xp:     linear-gradient(90deg, var(--cac-xp-from), var(--cac-xp-to));
+  --cac-grad-progress: linear-gradient(90deg, var(--cac-accent-dim), var(--cac-accent));
+  --cac-grad-portrait: radial-gradient(circle at 50% 55%, #2a2f42 0%, #1a1d29 100%);
+}
+
+/* =============================================================
+   Semantic type primitives — utility classes the brand uses
+   ============================================================= */
+
+.cac-body {
+  font-family: var(--cac-font-sans);
+  font-size: var(--cac-size-14);
+  line-height: var(--cac-line-base);
+  color: var(--cac-text);
+}
+
+.cac-body-2 {
+  font-family: var(--cac-font-sans);
+  font-size: var(--cac-size-12);
+  line-height: var(--cac-line-base);
+  color: var(--cac-text);
+}
+
+.cac-body-dim {
+  font-size: var(--cac-size-12);
+  color: var(--cac-text-dim);
+}
+
+.cac-muted {
+  font-size: var(--cac-size-11);
+  color: var(--cac-text-muted);
+}
+
+/* Engraved-plaque caps — the signature H2 in the game UI */
+.cac-h2 {
+  font-family: var(--cac-font-sans);
+  font-size: var(--cac-size-13);
+  font-weight: var(--cac-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--cac-text-dim);
+  margin: 0;
+}
+
+/* Stat-cell label — smaller, tighter tracking */
+.cac-label {
+  font-size: var(--cac-size-10);
+  font-weight: var(--cac-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--cac-text-muted);
+}
+
+/* Tabular numeric cells — always use for currencies, timers, counts */
+.cac-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Modal header */
+.cac-h3 {
+  font-family: var(--cac-font-sans);
+  font-size: var(--cac-size-16);
+  font-weight: var(--cac-weight-bold);
+  margin: 0;
+}
+
+/* Brand wordmark: gold → coral gradient clip-text, set in Fraunces display */
+.cac-brand-title {
+  font-family: var(--cac-font-display);
+  font-size: var(--cac-size-20);
+  font-weight: 700;
+  font-variation-settings: 'opsz' 72, 'SOFT' 100, 'WONK' 1;
+  letter-spacing: -0.3px;
+  background: var(--cac-grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  display: inline-block;
+}
+
+/* Display headline — use for hero, marketing, big moments */
+.cac-display {
+  font-family: var(--cac-font-display);
+  font-weight: 700;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  letter-spacing: -1px;
+  line-height: 1.05;
+  color: var(--cac-text);
+}
+
+/* Verdict / state badge — ALL CAPS, tracked, short */
+.cac-verdict {
+  font-size: var(--cac-size-12);
+  font-weight: var(--cac-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+/* "ON MISSION" ribbon style */
+.cac-ribbon {
+  font-size: var(--cac-size-10);
+  font-weight: var(--cac-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--cac-accent);
+}
+
+/* Log / hazard description italic */
+.cac-flavor {
+  font-size: var(--cac-size-12);
+  color: var(--cac-text-dim);
+  font-style: italic;
+}

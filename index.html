@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cat Adventure Club</title>
+  <link rel="icon" type="image/svg+xml" href="assets/app-icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,100,0..1&display=swap">
+  <link rel="stylesheet" href="colors_and_type.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="top-bar">
+    <div class="brand">
+      <img class="brand-mark" src="assets/paw-logo.svg" alt="" aria-hidden="true" width="28" height="28">
+      <span class="brand-title">Cat Adventure Club</span>
+      <span class="brand-version" title="Alpha build">v0.1.0-alpha</span>
+    </div>
+    <div class="resources">
+      <span class="res-gold"    title="Moneys — earned on every mission. Unlocks higher tiers and pays for shop upgrades.">💰 <span id="gold">0</span></span>
+      <span class="res-fish"    title="Fishes — uncommon drop. Buys consumables, garden seeds, and fishing upgrades.">🐟 <span id="fishes">0</span></span>
+      <span class="res-treaty"  title="Treaties — rare. Commission custom missions, buy Stat Tonics, or trigger premium shop items.">🎀 <span id="treaties">0</span></span>
+      <span class="res-9lives"  title="Nine Lives — prestige currency. Earned on Cat Nap. Spend on Eternal Perks and Club Perks.">🌀 <span id="nine-lives">0</span></span>
+      <span class="res-cats"    title="Club members. Raise the cap via the Extra Club Slot Eternal Perk.">🐈 <span id="cat-count">0/16</span></span>
+    </div>
+    <div class="top-actions">
+      <a id="feedback-link" class="feedback-link" href="https://github.com/latentnyc/CatAC/issues/new" target="_blank" rel="noopener" title="Report a bug or share feedback on GitHub">🐛 Feedback</a>
+      <span id="save-indicator" title="Saved">●</span>
+    </div>
+  </header>
+
+  <main id="layout">
+    <section class="column column-party">
+      <h2>The Club</h2>
+      <div id="party-panel"></div>
+    </section>
+
+    <section class="column column-hoods">
+      <div id="neighborhood-tabs"></div>
+      <div id="hood-flavor" class="hood-flavor"></div>
+      <div id="missions-panel"></div>
+    </section>
+
+    <section class="column column-inv">
+      <details class="shop-details" open>
+        <summary><h2>Club Shop</h2></summary>
+        <div id="shop-panel"></div>
+      </details>
+
+      <details class="eternal-details">
+        <summary><h2>🌀 Eternal Perks</h2></summary>
+        <div id="eternal-panel"></div>
+        <div id="cat-nap-area"></div>
+      </details>
+
+      <details class="club-details">
+        <summary><h2>🎓 Club Level</h2></summary>
+        <div id="club-level-info"></div>
+        <div id="club-perks-panel"></div>
+      </details>
+
+      <details class="achievement-details">
+        <summary><h2>🏆 Achievements</h2></summary>
+        <div id="achievements-panel"></div>
+      </details>
+
+      <details class="stars-details">
+        <summary><h2>🌙 Stargazing</h2></summary>
+        <div id="stars-panel"></div>
+      </details>
+
+      <details class="fishing-details">
+        <summary><h2>🎣 Fishing Hole</h2></summary>
+        <div id="fishing-panel"></div>
+      </details>
+
+      <details class="garden-details">
+        <summary><h2>🌿 Catnip Garden</h2></summary>
+        <div id="garden-panel"></div>
+      </details>
+
+      <details class="challenges-details">
+        <summary><h2>⚔️ Challenges</h2></summary>
+        <div id="challenges-panel"></div>
+      </details>
+
+      <details class="mastery-details">
+        <summary><h2>🧤 Gear Mastery</h2></summary>
+        <div id="mastery-panel"></div>
+      </details>
+
+      <details class="bestiary-details">
+        <summary><h2>📚 Bestiary</h2></summary>
+        <div id="bestiary-panel"></div>
+      </details>
+      <h2>Club Inventory</h2>
+      <div id="inventory-toolbar"></div>
+      <div id="inventory-panel"></div>
+      <h2>Activity</h2>
+      <div id="log-panel"></div>
+
+      <details class="lounge-details">
+        <summary><h2>🏡 Cat Lounge</h2></summary>
+        <div id="lounge-panel"></div>
+      </details>
+
+      <details class="settings-details">
+        <summary><h2>⚙️ Settings</h2></summary>
+        <div id="settings-panel">
+          <div class="settings-section">
+            <div class="settings-label">Build</div>
+            <div class="settings-hint muted">
+              v0.1.0-alpha — early build shared with friends.<br>
+              Bug or idea? <a href="https://github.com/latentnyc/CatAC/issues/new" target="_blank" rel="noopener">File an issue on GitHub</a>.
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-label">Save Data</div>
+            <div class="settings-actions">
+              <button id="save-export">Export to clipboard</button>
+              <button id="save-import">Import from text</button>
+            </div>
+            <textarea id="save-textarea" class="save-textarea" rows="4" spellcheck="false"
+              placeholder="Click Export to copy your save here, or paste a save JSON and click Import."></textarea>
+            <div class="settings-hint muted">Your save lives in this browser. Export before clearing site data.</div>
+          </div>
+          <div class="settings-section danger">
+            <div class="settings-label">Danger Zone</div>
+            <button id="save-reset" class="danger-btn">🗑️ Start Fresh</button>
+            <div class="settings-hint muted">Wipes everything: cats, gold, prestige, bestiary. Cannot be undone.</div>
+          </div>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <footer id="active-strip">
+    <h2>Active Missions</h2>
+    <div id="missions-active-panel"></div>
+  </footer>
+
+  <div id="modal">
+    <div id="modal-box">
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast-stack" aria-live="polite"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

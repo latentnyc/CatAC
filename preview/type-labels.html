@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--cac-bg);color:var(--cac-text);font-family:var(--cac-font-sans)}
+  .card{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .lbl{font-size:10px;color:#70748a;text-transform:uppercase;letter-spacing:.8px;min-width:96px}
+  .cap{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#70748a}
+  .verdict{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px}
+  .v-crit{color:#82e0a1}.v-fav{color:#4caf7d}.v-risk{color:#ffd866}.v-doom{color:#d96c6c}
+  .ribbon{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#ffd866;background:rgba(0,0,0,.72);padding:2px 8px;border-radius:4px}
+  .state{font-size:9px;color:#4caf7d;text-transform:uppercase;letter-spacing:.8px;font-weight:600}
+</style></head>
+<body><div class="card">
+  <div class="row"><div class="lbl">stat labels</div><div class="cap">STR</div><div class="cap">DEX</div><div class="cap">CON</div><div class="cap">INT</div><div class="cap">WIS</div><div class="cap">CHA</div></div>
+  <div class="row"><div class="lbl">verdicts</div><span class="verdict v-crit">LIKELY CRIT</span><span class="verdict v-fav">FAVORED</span><span class="verdict v-risk">RISKY</span><span class="verdict v-doom">DOOMED</span></div>
+  <div class="row"><div class="lbl">ribbons</div><span class="ribbon">ON MISSION</span><span class="state">UNLOCKED</span><span class="state">EQUIPPED</span></div>
+</div></body></html>

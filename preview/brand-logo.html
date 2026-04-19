@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,700,100,1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--cac-bg);color:var(--cac-text);font-family:var(--cac-font-sans)}
+  .card{padding:20px;display:grid;grid-template-columns:auto auto auto 1fr;gap:20px;align-items:center}
+  .item{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .item img{height:86px}
+  .lockup{display:flex;align-items:center;gap:14px}
+  .lockup img{height:72px}
+  .lockup-word{display:flex;flex-direction:column;line-height:0.95}
+  .lockup-word .w{font-family:var(--cac-font-display);font-weight:700;font-variation-settings:'opsz' 72,'SOFT' 100,'WONK' 1;font-size:30px;letter-spacing:-0.5px;background:var(--cac-grad-brand);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lbl{font-size:10px;color:var(--cac-text-muted);letter-spacing:0.6px;text-transform:uppercase}
+</style></head>
+<body><div class="card">
+  <div class="item"><img src="../assets/paw-logo.svg"><div class="lbl">paw · colored</div></div>
+  <div class="item"><img src="../assets/paw-logo-mono.svg"><div class="lbl">paw · mono</div></div>
+  <div class="item"><img src="../assets/app-icon.svg"><div class="lbl">app icon</div></div>
+  <div class="lockup">
+    <img src="../assets/paw-logo.svg">
+    <div class="lockup-word">
+      <span class="w">Cat Adventure</span>
+      <span class="w">Club</span>
+    </div>
+  </div>
+</div></body></html>

@@ -1,0 +1,25 @@
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Claude Code local settings (machine-specific)
+.claude/
+
+# Node (in case tooling gets added later)
+node_modules/
+npm-debug.log
+package-lock.json
+yarn.lock
+
+# Throwaway smoke tests
+smoketest.js
+*.tmp

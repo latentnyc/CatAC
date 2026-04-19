@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--cac-bg);color:var(--cac-text);font-family:var(--cac-font-sans)}
+  .card{padding:20px 22px;display:flex;gap:10px;flex-wrap:wrap}
+  .btn{font-family:inherit;font-size:12px;font-weight:700;border-radius:5px;padding:8px 14px;cursor:pointer;border:none;transition:all .15s}
+  .primary{background:#ffd866;color:#2a2a2a}
+  .primary:hover{filter:brightness(1.1)}
+  .secondary{background:#3a4057;color:#e6e6ea}
+  .secondary:hover{background:#ffd866;color:#2a2a2a}
+  .ghost{background:transparent;border:1px solid #2e3343;color:#a0a4b4;padding:6px 10px;font-weight:400}
+  .ghost:hover{border-color:#c9a94a;color:#ffd866}
+  .sell{background:#4caf7d;color:#0e1a13}
+  .small{font-size:11px;padding:4px 8px;border-radius:5px}
+  .disabled{opacity:.5;cursor:not-allowed}
+</style></head>
+<body><div class="card">
+  <button class="btn primary">Send party</button>
+  <button class="btn secondary">Plan</button>
+  <button class="btn ghost">Cancel</button>
+  <button class="btn sell">Sell for 40g</button>
+  <button class="btn secondary small">Buy 10🐟</button>
+  <button class="btn primary disabled">Disabled</button>
+</div></body></html>

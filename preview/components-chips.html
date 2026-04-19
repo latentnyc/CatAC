@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--cac-bg);color:var(--cac-text);font-family:var(--cac-font-sans)}
+  .card{padding:20px 22px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{background:#242836;border:1px solid #2e3343;color:#a0a4b4;border-radius:12px;padding:4px 11px;font-size:11px;font-weight:600}
+  .pill.active{background:#3a4057;color:#e6e6ea}
+  .pill.c{border-color:#B8B8B8;color:#B8B8B8}
+  .pill.r{border-color:#4AA3FF;color:#4AA3FF}
+  .pill.e{border-color:#B04AFF;color:#B04AFF}
+  .pill.l{border-color:#FFB347;color:#FFB347}
+  .chip{border:1px solid #2e3343;border-radius:12px;padding:4px 10px;font-size:11px;font-weight:600}
+  .chip.mit{border-color:#c4956c;color:#d7ae8a}
+  .chip.loot{border-color:#b89ce8;color:#c9a9f5}
+  .chip.speed{border-color:#57a8d3;color:#7cc0e0}
+  .chip.floor{border-color:#6fb86b;color:#8cd087}
+  .chip.syn{border-color:#ffd866;color:#ffd866;background:color-mix(in srgb,#ffd866 10%,#242836)}
+  .count{margin-left:4px;color:#70748a;font-variant-numeric:tabular-nums}
+</style></head>
+<body><div class="card">
+  <span class="pill active">All <span class="count">42</span></span>
+  <span class="pill c">Common <span class="count">24</span></span>
+  <span class="pill r">Rare <span class="count">12</span></span>
+  <span class="pill e">Epic <span class="count">5</span></span>
+  <span class="pill l">Legendary <span class="count">1</span></span>
+  <span class="chip mit">⚔ +3 mitigation</span>
+  <span class="chip loot">✿ +5% loot</span>
+  <span class="chip speed">✶ -8% time</span>
+  <span class="chip floor">✚ +8% floor</span>
+  <span class="chip syn">🛡️ Guardian Pact</span>
+</div></body></html>

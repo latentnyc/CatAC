@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:var(--cac-bg);color:var(--cac-text);font-family:var(--cac-font-sans);font-size:14px}
+  .card{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .sw{display:flex;flex-direction:column;gap:4px;min-width:96px}
+  .chip{height:44px;border-radius:8px}
+  .n{font-size:10px;color:var(--cac-text-muted);letter-spacing:.5px;text-transform:uppercase}
+  .v{font-size:11px;color:var(--cac-text-dim);font-variant-numeric:tabular-nums}
+  .lbl{font-size:12px;color:var(--cac-text)}
+  .item{border:1.5px solid var(--cac-border);border-radius:6px;padding:8px 10px;background:#242836;min-width:140px}
+  .item.c{border-color:#B8B8B8}
+  .item.r{border-color:#4AA3FF}
+  .item.e{border-color:#B04AFF}
+  .item.l{border-color:#FFB347;box-shadow:0 0 12px rgba(255,179,71,.25)}
+  .item .iname{font-weight:600;font-size:12px;margin-top:2px}
+  .item.c .iname{color:#B8B8B8}
+  .item.r .iname{color:#4AA3FF}
+  .item.e .iname{color:#B04AFF}
+  .item.l .iname{color:#FFB347}
+  .item .itype{font-size:9px;color:#70748a;text-transform:uppercase;letter-spacing:.8px}
+</style></head>
+<body><div class="card">
+  <div class="n">Rarity scale — borders & name color</div>
+  <div class="row">
+    <div class="item c"><div class="itype">Collar</div><div class="iname">Plain Bell</div><div class="v">+1 DEX</div></div>
+    <div class="item r"><div class="itype">Toy</div><div class="iname">Sturdy Wand</div><div class="v">+2 INT</div></div>
+    <div class="item e"><div class="itype">Relic</div><div class="iname">Ancient Amulet</div><div class="v">+4 WIS</div></div>
+    <div class="item l"><div class="itype">Treat</div><div class="iname">Mythic Tuna</div><div class="v">+6 CON</div></div>
+  </div>
+</div></body></html>

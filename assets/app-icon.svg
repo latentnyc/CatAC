@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140" width="140" height="140" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#242836"></stop>
+      <stop offset="1" stop-color="#14161c"></stop>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd866"></stop>
+      <stop offset="1" stop-color="#ff9f68"></stop>
+    </linearGradient>
+  </defs>
+  <circle cx="70" cy="70" r="66" fill="url(#bg)" stroke="url(#ring)" stroke-width="3"></circle>
+  <g transform="translate(10 10)">
+    <path d="M60 52 C 38 52, 24 68, 24 84 C 24 98, 36 108, 48 108 C 54 108, 58 106, 60 104 C 62 106, 66 108, 72 108 C 84 108, 96 98, 96 84 C 96 68, 82 52, 60 52 Z" fill="#ffd866"></path>
+    <ellipse cx="24" cy="48" rx="10" ry="13" fill="#6fb86b" transform="rotate(-24 24 48)"></ellipse>
+    <ellipse cx="46" cy="26" rx="10" ry="14" fill="#57a8d3" transform="rotate(-10 46 26)"></ellipse>
+    <ellipse cx="74" cy="26" rx="10" ry="14" fill="#b89ce8" transform="rotate(10 74 26)"></ellipse>
+    <ellipse cx="96" cy="48" rx="10" ry="13" fill="#e89660" transform="rotate(24 96 48)"></ellipse>
+  </g>
+</svg>
