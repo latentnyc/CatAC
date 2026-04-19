@@ -292,13 +292,19 @@ function renderParty() {
     card.classList.toggle("busy", cat.status === "mission");
     card.classList.toggle("stationed", cat.status === "stationed");
 
-    // Best-hood hint: only surface for idle cats; for busy/stationed cats it's noise.
+    // Best-hood hint + bond partners: shown on the same line for idle cats.
     const suggestedEl = $(".cat-suggested", card);
     if (suggestedEl) {
       if (cat.status === "idle") {
         const hood = suggestedHoodForCat(cat);
-        if (hood) {
-          suggestedEl.innerHTML = `Best fit: <span>${hood.icon} ${escapeHtml(hood.name)}</span>`;
+        const partners = bondPartners(cat.id);
+        const partnerNames = partners.map(pid => findCat(pid)?.name).filter(Boolean);
+        const hoodHtml = hood ? `Best fit: <span>${hood.icon} ${escapeHtml(hood.name)}</span>` : "";
+        const bondHtml = partnerNames.length
+          ? `<span class="cat-bond-indicator" title="Bonded with: ${escapeHtml(partnerNames.join(", "))}. Pair them in a party for +${BOND_SCORE_BONUS} score, +${Math.round(BOND_LOOT_PCT_BONUS * 100)}% loot.">\u{1F49E} ${partnerNames.length}</span>`
+          : "";
+        if (hoodHtml || bondHtml) {
+          suggestedEl.innerHTML = `${hoodHtml}${hoodHtml && bondHtml ? " · " : ""}${bondHtml}`;
           suggestedEl.style.display = "";
         } else {
           suggestedEl.style.display = "none";
@@ -1335,24 +1341,44 @@ function openCatNapModal() {
   }
   const idle = gameState.cats.filter(c => c.status === "idle");
   if (!idle.length) { alert("No idle cats to carry forward."); return; }
-  const preview = nineLivesPreview();
+  uiState.napSelected = new Set();
+  renderCatNapModal();
+  $("#modal").classList.add("open");
+}
+
+function renderCatNapModal() {
   const body = $("#modal-body");
+  if (!body) return;
+  const idle = gameState.cats.filter(c => c.status === "idle");
+  const preview = nineLivesPreview();
+  const cap = catNapKeepCount();
+  const selected = uiState.napSelected || new Set();
+  const capHit = selected.size >= cap;
+
   const catRows = idle.map(cat => {
     const breed = CAT_BREEDS[cat.breed];
     const vet = cat.veteranLevel ? ` · Vet ${toRoman(cat.veteranLevel)}` : "";
     const gearCount = ITEM_SLOTS.reduce((n, s) => n + (cat.equipped[s] ? 1 : 0), 0);
-    return `<button class="picker-cat-btn" data-nap-keep="${cat.id}">
+    const isSel = selected.has(cat.id);
+    const canToggle = isSel || !capHit;
+    return `<label class="nap-cat-row ${isSel ? "selected" : ""} ${canToggle ? "" : "disabled"}">
+      <input type="checkbox" data-nap-toggle="${cat.id}" ${isSel ? "checked" : ""} ${canToggle ? "" : "disabled"}>
       <div class="equip-cat-line">${escapeHtml(cat.name)} · ${breed.classLabel} Lv${cat.level}${vet}</div>
       <div class="equip-delta muted">Carries ${gearCount} equipped item${gearCount === 1 ? "" : "s"}. Veteran ${toRoman((cat.veteranLevel || 0) + 1)} after nap.</div>
-    </button>`;
+    </label>`;
   }).join("");
+
+  const retireCount = gameState.cats.length - selected.size;
+  const confirmDisabled = selected.size === 0;
   body.innerHTML = `
     <h3>\u{1F4A4} Cat Nap</h3>
-    <p>You'll earn <strong>+${preview} 🌀 Nine Lives</strong>. The other 15 cats retire to the Lounge.</p>
-    <p class="muted">Pick the cat to carry forward with their gear:</p>
-    <div class="picker-list">${catRows}</div>
-    <div class="modal-actions"><button data-modal-close>Cancel</button></div>`;
-  $("#modal").classList.add("open");
+    <p>You'll earn <strong>+${preview} \uD83C\uDF00 Nine Lives</strong>. Pick up to <strong>${cap}</strong> cat${cap > 1 ? "s" : ""} to carry forward with their gear; the other ${retireCount} retire${retireCount === 1 ? "s" : ""} to the Lounge.</p>
+    <p class="muted">Selected: ${selected.size}/${cap}${cap > 1 ? " \u2014 raise the cap with the Cherished Companion Eternal Perk." : ""}</p>
+    <div class="picker-list nap-list">${catRows}</div>
+    <div class="modal-actions">
+      <button data-modal-close>Cancel</button>
+      <button class="btn-primary" id="cat-nap-confirm" ${confirmDisabled ? "disabled" : ""}>Begin Nap (${selected.size})</button>
+    </div>`;
 }
 
 function renderLog() {
@@ -1583,6 +1609,27 @@ function renderPicker() {
   ).join("");
   const synergyBlock = synergyChips ? `<div class="picker-passives picker-synergies">${synergyChips}</div>` : "";
 
+  // Bonded-pair indicator — shows +3 score / +2% loot per bonded pair currently in the party.
+  const bondCount = bondedPairsInParty(selectedIds);
+  const bondChip = bondCount > 0
+    ? `<span class="pass-chip pass-bond" title="Bonded pairs grant +${BOND_SCORE_BONUS} score and +${Math.round(BOND_LOOT_PCT_BONUS * 100)}% loot each.">\u{1F49E} ${bondCount} bonded pair${bondCount > 1 ? "s" : ""}</span>`
+    : "";
+
+  // Gear-set indicator — any matching-element set of 2+ pieces across the party.
+  const setCounts = partyGearSets(selectedIds);
+  const setChips = NEIGHBORHOOD_IDS.map(id => {
+    const n = setCounts[id];
+    if (n < 2) return "";
+    const hood = NEIGHBORHOODS[id];
+    const tierTxt = n >= 4 ? "4-piece" : "2-piece";
+    const matching = id === uiState.picker?.neighborhoodId;
+    const tip = matching
+      ? `${tierTxt} ${hood.name} set: +${n >= 4 ? 4 : 1} mitigation here${n >= 4 ? ", +3% loot globally" : ""}.`
+      : `${tierTxt} ${hood.name} set${n >= 4 ? ": +3% loot globally" : " (no mit bonus — wrong hood)"}`;
+    return `<span class="pass-chip pass-set" title="${escapeHtml(tip)}">${hood.icon} ${tierTxt}</span>`;
+  }).filter(Boolean).join("");
+  const setBlock = (bondChip || setChips) ? `<div class="picker-passives picker-sets">${bondChip}${setChips}</div>` : "";
+
   // "Use last party" link — show if any of the last party's cats are still idle.
   const lastParty = (gameState.lastParty || []).filter(id => {
     const c = findCat(id);
@@ -1601,6 +1648,7 @@ function renderPicker() {
     </div>
     ${passivesBlock}
     ${synergyBlock}
+    ${setBlock}
     ${hazardBlock}
     ${lastPartyLink}
     <div class="picker-list">${catRows || '<div class="empty-state">No idle cats available.</div>'}</div>
@@ -1689,6 +1737,36 @@ function openOfflineModal(summary) {
   for (const r of summary.resolved) {
     if (r.strayOffer) uiState.strayQueue.push(r.strayOffer);
   }
+}
+
+// --- Golden Mouse modal -------------------------------------------------
+
+function openGoldenMouseModal() {
+  const body = $("#modal-body");
+  if (!body) return;
+  const choices = GOLDEN_MOUSE_CHOICES.map(choice => {
+    const costTxt = Object.entries(choice.cost || {}).map(([k, v]) => `${v}${k === "fishes" ? "\uD83D\uDC1F" : k === "treaties" ? "\uD83C\uDF80" : "\uD83D\uDCB0"}`).join(" ");
+    const afford = canAfford(choice.cost || {});
+    return `<button class="mouse-choice" data-mouse-choice="${choice.id}" ${afford ? "" : "disabled"}>
+      <div class="mouse-choice-head">${escapeHtml(choice.label)} ${costTxt ? `<span class="muted">· ${costTxt}</span>` : `<span class="muted">· free</span>`}</div>
+      <div class="mouse-choice-desc muted">${escapeHtml(choice.desc)}</div>
+    </button>`;
+  }).join("");
+  body.innerHTML = `
+    <h3>\u{1F9C0} A Golden Mouse!</h3>
+    <p>A glittering mouse scurries past the club window. Your cats perk up \u2014 what do you do?</p>
+    <div class="mouse-choices">${choices}</div>
+    <div class="modal-actions"><button data-modal-close id="mouse-dismiss">Pretend you didn't see it</button></div>`;
+  $("#modal").classList.add("open");
+}
+
+// Present the next queued Golden Mouse, if any and no modal is currently open.
+function presentNextGoldenMouse() {
+  const q = gameState.goldenMouseQueue || [];
+  if (!q.length) return;
+  const modal = $("#modal");
+  if (modal && modal.classList.contains("open")) return;
+  openGoldenMouseModal();
 }
 
 // --- Welcome modal (first-run onboarding) ------------------------------
@@ -1865,6 +1943,22 @@ function wireEvents(onMutation) {
 
     if (t.closest("[data-modal-close]")) { closeModal(); return; }
     if (t.id === "modal" && t.classList.contains("open")) { closeModal(); return; }
+
+    // Golden Mouse: choice selected or dismissed.
+    const mouseChoice = t.closest("[data-mouse-choice]");
+    if (mouseChoice && !mouseChoice.disabled) {
+      const r = resolveGoldenMouse(mouseChoice.dataset.mouseChoice);
+      if (!r.ok) { alert(r.reason); return; }
+      closeModal();
+      onMutation();
+      return;
+    }
+    if (t.id === "mouse-dismiss") {
+      dismissGoldenMouse();
+      closeModal();
+      onMutation();
+      return;
+    }
 
     // Welcome modal dismiss — set the flag so returning players skip it.
     if (t.id === "welcome-dismiss") {
@@ -2172,17 +2266,17 @@ function wireEvents(onMutation) {
       return;
     }
 
-    // Cat Nap: cat chosen — confirm and prestige.
-    const napBtn = t.closest("[data-nap-keep]");
-    if (napBtn) {
-      const keepId = napBtn.dataset.napKeep;
-      const kept = findCat(keepId);
-      if (!kept) return;
+    // Cat Nap: confirm the selected roster and prestige.
+    if (t.id === "cat-nap-confirm" && !t.disabled) {
+      const selected = uiState.napSelected ? Array.from(uiState.napSelected) : [];
+      if (!selected.length) return;
       const preview = nineLivesPreview();
-      const ok = confirm(`Cat Nap: carry ${kept.name} forward (Veteran ${toRoman((kept.veteranLevel || 0) + 1)}), retire the rest, earn +${preview} 🌀 Nine Lives. Continue?`);
+      const names = selected.map(id => findCat(id)?.name).filter(Boolean).join(", ");
+      const ok = confirm(`Cat Nap: carry ${names} forward, retire the rest, earn +${preview} 🌀 Nine Lives. Continue?`);
       if (!ok) return;
-      const r = prestige(keepId);
+      const r = prestige(selected);
       if (!r.ok) { alert(r.reason); return; }
+      uiState.napSelected = new Set();
       closeModal();
       renderAll();
       return;
@@ -2362,6 +2456,14 @@ function wireEvents(onMutation) {
     if (t.id === "inv-sort-select") {
       uiState.inventorySort = t.value;
       renderInventory();
+      return;
+    }
+    if (t.matches("[data-nap-toggle]")) {
+      uiState.napSelected = uiState.napSelected || new Set();
+      const id = t.dataset.napToggle;
+      if (t.checked) uiState.napSelected.add(id);
+      else uiState.napSelected.delete(id);
+      renderCatNapModal();
       return;
     }
     if (t.matches("[data-commission-mod]") && uiState.commission) {

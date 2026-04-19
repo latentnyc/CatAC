@@ -40,6 +40,7 @@ function boot() {
         for (const r of resolved) showMissionToast(r);
         renderAll();
         presentNextStray();
+        presentNextGoldenMouse();
       }
     }
     // Once a minute, check for daily/weekly rollover.
@@ -60,8 +61,9 @@ function boot() {
 function onMutation() {
   renderAll();
   requestSave();
-  // Presenting strays is safe even if a modal is open — it checks.
+  // Stray + mouse presenters both no-op if a modal is already open.
   presentNextStray();
+  presentNextGoldenMouse();
 }
 
 if (document.readyState === "loading") {

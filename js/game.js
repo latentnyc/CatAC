@@ -140,6 +140,123 @@ function partySynergyTotals(catIds) {
   return totals;
 }
 
+// --- Golden Mouse events ------------------------------------------------
+
+// Roll a Golden Mouse chance on mission resolve; if it lands, queue an event the UI can
+// pick up and present as a modal. Very low chance (3%), only on non-fail outcomes.
+function maybeQueueGoldenMouse(outcome) {
+  if (outcome === "fail") return;
+  if (Math.random() >= GOLDEN_MOUSE_CHANCE) return;
+  gameState.goldenMouseQueue = gameState.goldenMouseQueue || [];
+  gameState.goldenMouseQueue.push({ id: uid(), at: Date.now() });
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.mouseSeen = true;
+}
+
+// Apply a chosen Golden Mouse effect. Returns { ok, reason } — reason for "can't afford".
+function resolveGoldenMouse(choiceId) {
+  const choice = GOLDEN_MOUSE_CHOICES.find(c => c.id === choiceId);
+  if (!choice) return { ok: false, reason: "Unknown choice." };
+  if (!canAfford(choice.cost)) return { ok: false, reason: "Can't afford that." };
+  payCost(choice.cost);
+  choice.apply();
+  // Dequeue one event.
+  (gameState.goldenMouseQueue || []).shift();
+  requestSave();
+  return { ok: true };
+}
+
+function dismissGoldenMouse() {
+  (gameState.goldenMouseQueue || []).shift();
+  requestSave();
+}
+
+// --- Cat Bonds ---------------------------------------------------------
+
+function bondKey(aId, bId) {
+  return aId < bId ? aId + "|" + bId : bId + "|" + aId;
+}
+
+// Increment the co-mission counter for every pair in the party. If a pair crosses the bond
+// threshold for the first time, fire a log event celebrating the new bond.
+function recordMissionBond(catIds) {
+  if (!catIds || catIds.length < 2) return;
+  gameState.catBonds = gameState.catBonds || {};
+  for (let i = 0; i < catIds.length; i++) {
+    for (let j = i + 1; j < catIds.length; j++) {
+      const key = bondKey(catIds[i], catIds[j]);
+      const before = gameState.catBonds[key] || 0;
+      const after = before + 1;
+      gameState.catBonds[key] = after;
+      if (before < BOND_THRESHOLD && after >= BOND_THRESHOLD) {
+        const a = findCat(catIds[i]), b = findCat(catIds[j]);
+        if (a && b) logEvent(`\u{1F49E} ${a.name} and ${b.name} formed a lasting bond.`);
+      }
+    }
+  }
+}
+
+// Count how many bonded pairs are in the current party. Used for score and loot bumps.
+function bondedPairsInParty(catIds) {
+  if (!catIds || catIds.length < 2) return 0;
+  let pairs = 0;
+  for (let i = 0; i < catIds.length; i++) {
+    for (let j = i + 1; j < catIds.length; j++) {
+      const count = gameState.catBonds?.[bondKey(catIds[i], catIds[j])] || 0;
+      if (count >= BOND_THRESHOLD) pairs++;
+    }
+  }
+  return pairs;
+}
+
+// Return the list of cat ids that are bonded with this one among the current roster.
+function bondPartners(catId) {
+  const out = [];
+  for (const other of gameState.cats) {
+    if (other.id === catId) continue;
+    const count = gameState.catBonds?.[bondKey(catId, other.id)] || 0;
+    if (count >= BOND_THRESHOLD) out.push(other.id);
+  }
+  return out;
+}
+
+// Gear set bonuses — count equipped items matching each neighborhood element across the
+// whole party. Each threshold hit adds a per-match mitigation and a per-set loot bump.
+// Two-piece: +1 mitigation on that hood. Four-piece: additional +3 mitigation and +3% loot.
+// Returns per-hood counts and the aggregated bonuses. Pure read — safe to call anywhere.
+function partyGearSets(catIds) {
+  const counts = {};
+  for (const hoodId of NEIGHBORHOOD_IDS) counts[hoodId] = 0;
+  for (const id of catIds) {
+    const cat = findCat(id);
+    if (!cat) continue;
+    for (const slot of ITEM_SLOTS) {
+      const item = findItem(cat.equipped[slot]);
+      if (!item) continue;
+      if (counts[item.affinity] !== undefined) counts[item.affinity]++;
+    }
+  }
+  return counts;
+}
+
+// Given the counts + the active neighborhood, return the bonuses this set contributes.
+// Only the mission's own hood benefits from mitigation; loot bumps are global.
+function gearSetBonuses(catIds, neighborhoodId) {
+  const counts = partyGearSets(catIds);
+  let setMit = 0;
+  let setLootPct = 0;
+  for (const hoodId of NEIGHBORHOOD_IDS) {
+    const n = counts[hoodId];
+    if (n < 2) continue;
+    if (hoodId === neighborhoodId) setMit += 1;       // 2-piece (any hood) → +1 mit if matching
+    if (n >= 4) {
+      setLootPct += 0.03;                             // 4-piece → +3% loot globally
+      if (hoodId === neighborhoodId) setMit += 3;     // 4-piece matching → +3 more mit
+    }
+  }
+  return { setMit, setLootPct, counts };
+}
+
 // Sum active Challenge Boons into the same bonus shape. Boons persist across prestige;
 // the player grinds challenges to stack these permanently.
 function challengeBoonTotals() {
@@ -226,9 +343,20 @@ function partyBonuses(catIds) {
   const b = challengeBoonTotals();
   const m = masteryPartyTotals(catIds);
   const t = partyTalentTotals(catIds);
+  // Gear sets contribute a global loot % (4-piece). Mitigation is hood-specific and applied
+  // in partyMitigation(), not here.
+  let setLootPct = 0;
+  for (const hoodId of NEIGHBORHOOD_IDS) {
+    const counts = {}; // recount locally to avoid re-walking cats twice per call
+  }
+  // Rather than duplicate the count, call the shared helper and discard the mit term here.
+  const setTotals = gearSetBonuses(catIds, null);
+  setLootPct = setTotals.setLootPct;
+  // Bonded pairs contribute a small loot-chance bump each.
+  const bondLoot = bondedPairsInParty(catIds) * BOND_LOOT_PCT_BONUS;
   return {
     mit:         (p.mit || 0)         + (s.mit || 0)         + (b.mit || 0)         + (t.mit || 0),
-    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + bestiaryGlobalLootPct() + eternalLootPct(),
+    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + setLootPct + bondLoot + bestiaryGlobalLootPct() + eternalLootPct(),
     speedPct:    Math.min(0.5, (p.speedPct || 0) + (s.speedPct || 0) + (t.speedPct || 0)),
     floorPct:    (p.floorPct || 0)    + (s.floorPct || 0),
     xpPct:       (p.xpPct || 0)       + (s.xpPct || 0)       + (b.xpPct || 0)       + (t.xpPct || 0),
@@ -238,7 +366,8 @@ function partyBonuses(catIds) {
   };
 }
 
-// Shared mitigation pool: matching-element gear + Scrapper "Bulwark" bonus + Guardian Pact synergy.
+// Shared mitigation pool: matching-element gear + Scrapper "Bulwark" bonus + Guardian Pact
+// synergy + set bonuses (2/4-piece same-hood gear).
 function partyMitigation(catIds, neighborhoodId) {
   let total = 0;
   for (const catId of catIds) {
@@ -253,6 +382,10 @@ function partyMitigation(catIds, neighborhoodId) {
     }
   }
   total += partyBonuses(catIds).mit;
+  // Gear set bonuses: +1 mit per 2-piece on the current hood, +3 more per 4-piece on the
+  // current hood. Non-matching sets still contribute their global loot bump (applied via
+  // partyBonuses.lootPct) but do NOT add mit here.
+  total += gearSetBonuses(catIds, neighborhoodId).setMit;
   return total;
 }
 
@@ -386,6 +519,8 @@ function commissionChallenge(neighborhoodId, tier, modIds) {
   const mission = buildChallengeMission(neighborhoodId, tier, modIds);
   if (!mission) return { ok: false, reason: "Invalid mission." };
   gameState.treaties -= cost;
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.commissionsFiled = (gameState.achievementFlags.commissionsFiled || 0) + 1;
   logEvent(`Commissioned T${tier} ${NEIGHBORHOODS[neighborhoodId].name} \u2014 ${cost}\uD83C\uDF80${modIds.length ? ` with ${modIds.length} modifier${modIds.length > 1 ? "s" : ""}` : ""}.`);
   requestSave();
   return { ok: true, mission, cost };
@@ -578,6 +713,8 @@ function partyScore(catIds, mission) {
     total += check;
   }
   total += partyBonuses(catIds).scoreBonus;
+  // Cat Bonds: bonded pair in this party adds BOND_SCORE_BONUS per pair.
+  total += bondedPairsInParty(catIds) * BOND_SCORE_BONUS;
   return Math.round(total);
 }
 
@@ -978,6 +1115,8 @@ function hookFishingBite() {
   if (state === "waiting") return { ok: false, reason: "Too early \u2014 bobber is still." };
   if (state === "missed")  return { ok: false, reason: "Too late \u2014 the fish got away." };
   if (state !== "biting")  return { ok: false, reason: "Nothing to hook." };
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.hookedOnce = true;
   const res = resolveFishingCast({ rarityShift: FISHING_BITE_RARITY_SHIFT, hooked: true });
   // Auto-caster chain respects the early finish: re-cast right away.
   if (gameState.fishing.upgrades.auto) castFishingLine();
@@ -1132,6 +1271,8 @@ function harvestPlot(plotIdx) {
   gameState.garden.plots[plotIdx] = null;
   logEvent(`\uD83C\uDF3F Harvested: ${y.note}`);
   if (gardener) grantXp(gardener, STATION_XP_PER_HARVEST);
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.plotsHarvested = (gameState.achievementFlags.plotsHarvested || 0) + 1;
   requestSave();
   return { ok: true, yield: y };
 }
@@ -1395,10 +1536,13 @@ function resolveMission(active) {
   // Bestiary: track per-tier clears (hood + tier). Hook mastery XP + challenge progress.
   if (outcome !== "fail") {
     recordHoodTierCleared(active.neighborhoodId, mission.tier);
+    // Cat Bonds: only count successful missions toward bond-building.
+    recordMissionBond(active.catIds);
   }
   const masteryMul = outcome === "crit" ? 1.5 : outcome === "success" ? 1.0 : 0.5;
   grantSlotMastery(active.catIds, masteryMul);
   recordChallengeProgress(active, mission, outcome);
+  maybeQueueGoldenMouse(outcome);
 
   // Club XP: 5% of each cat's xpReward contribution feeds the club pool.
   grantClubXp(Math.max(1, Math.floor(xpPerCat * cats.length * 0.05)));
@@ -1931,43 +2075,56 @@ function nineLivesPreview() {
   return base + tierBonus;
 }
 
-// Prestige: keep one chosen cat (with gear), retire the rest, reset run state,
-// award 🌀 Nine Lives, and bump the kept cat's Veteran level (+1 to every base stat).
-function prestige(keepCatId) {
-  const kept = findCat(keepCatId);
-  if (!kept) return { ok: false, reason: "Pick a cat to carry forward." };
-  if (kept.status === "mission") return { ok: false, reason: "Kept cat is on a mission." };
+// Prestige: keep up to catNapKeepCount() chosen cats (with gear), retire the rest, reset run
+// state, award 🌀 Nine Lives, and bump each kept cat's Veteran level. Accepts either a single
+// string id (legacy) or an array of ids.
+function prestige(keepCatIdOrIds) {
+  const ids = Array.isArray(keepCatIdOrIds) ? keepCatIdOrIds : [keepCatIdOrIds];
+  if (!ids.length) return { ok: false, reason: "Pick at least one cat to carry forward." };
+  const cap = catNapKeepCount();
+  if (ids.length > cap) return { ok: false, reason: `You can only keep ${cap} cat${cap > 1 ? "s" : ""} this nap.` };
   if (gameState.missions.length) return { ok: false, reason: "Wait for all missions to finish first." };
-  // Station assignments reset on prestige (minigames reset anyway); clear the kept cat's
-  // station fields so they start the next run truly idle.
-  if (kept.status === "stationed") {
-    kept.status = "idle";
-    kept.station = null;
+
+  const keptCats = ids.map(findCat).filter(Boolean);
+  if (keptCats.length !== ids.length) return { ok: false, reason: "Some kept cats are missing." };
+  if (keptCats.some(c => c.status === "mission")) return { ok: false, reason: "A kept cat is on a mission." };
+  // Clear station assignments on every kept cat (minigames reset on prestige anyway).
+  for (const k of keptCats) {
+    if (k.status === "stationed") { k.status = "idle"; k.station = null; }
   }
 
   const earned = nineLivesPreview();
 
-  // Pluck kept cat's equipped items out of inventory.
-  const keptItemIds = new Set(Object.values(kept.equipped).filter(Boolean));
-  const keptItems   = gameState.inventory.filter(i => keptItemIds.has(i.id));
+  // Pluck all kept cats' equipped items.
+  const keptItemIds = new Set();
+  for (const k of keptCats) {
+    for (const id of Object.values(k.equipped)) if (id) keptItemIds.add(id);
+  }
+  const keptItems = gameState.inventory.filter(i => keptItemIds.has(i.id));
 
-  // Retire everyone else into the lounge (stackable across lifetimes).
+  // Retire everyone else into the lounge.
+  const keptIdSet = new Set(keptCats.map(k => k.id));
   for (const c of gameState.cats) {
-    if (c.id === kept.id) continue;
+    if (keptIdSet.has(c.id)) continue;
     gameState.loungeCats.unshift({
       id: c.id, name: c.name, breed: c.breed, palette: { ...c.palette },
       finalLevel: c.level, finalStats: { ...c.stats }, retiredAt: Date.now()
     });
   }
 
-  // Veteran +1 on kept cat (stacks each prestige, bypasses the 12 base cap).
-  // Big Heart Eternal Perk adds its level (up to +3) on top of the base +1.
-  kept.veteranLevel = (kept.veteranLevel || 0) + 1;
+  // Veteran +1 on every kept cat (Big Heart adds more).
   const statBumps = 1 + eternalBigHeart();
-  for (const s of STATS) {
-    kept.baseStats[s] = (kept.baseStats[s] || 0) + statBumps;
-    kept.stats[s]     = (kept.stats[s]     || 0) + statBumps;
+  for (const kept of keptCats) {
+    kept.veteranLevel = (kept.veteranLevel || 0) + 1;
+    for (const s of STATS) {
+      kept.baseStats[s] = (kept.baseStats[s] || 0) + statBumps;
+      kept.stats[s]     = (kept.stats[s]     || 0) + statBumps;
+    }
   }
+
+  // Track lifetime Nine Lives for the well-napped achievement.
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.lifetimeNineLives = (gameState.achievementFlags.lifetimeNineLives || 0) + earned;
 
   const persistents = {
     nineLives:        (gameState.nineLives || 0) + earned,
@@ -1986,17 +2143,22 @@ function prestige(keepCatId) {
     bestiaryRewards:  gameState.bestiaryRewards,
     // Onboarding flags persist across prestige — a Cat Nap shouldn't re-show the tutorial.
     tutorialSeen:     gameState.tutorialSeen,
-    uiAutoOpened:     gameState.uiAutoOpened
+    uiAutoOpened:     gameState.uiAutoOpened,
+    // Cat Bonds carry forward so kept-cat pairs retain their history.
+    catBonds:         gameState.catBonds
   };
-  const fresh = freshRunShell(persistents, kept, persistents.eternalPerks.headStartGold || 0);
+  // freshRunShell takes one starter; pass the first kept cat and splice the rest in after.
+  const fresh = freshRunShell(persistents, keptCats[0], persistents.eternalPerks.headStartGold || 0);
+  for (let i = 1; i < keptCats.length; i++) fresh.cats.push(keptCats[i]);
   fresh.inventory = keptItems;
   fresh.log.unshift({ t: Date.now(), msg: `+${earned} 🌀 Nine Lives earned.` });
-  fresh.log.unshift({ t: Date.now(), msg: `Cat Nap ${persistents.prestigeCount}. ${kept.name} returns at Veteran ${toRoman(kept.veteranLevel)}.` });
+  const roster = keptCats.map(k => `${k.name} (Vet ${toRoman(k.veteranLevel)})`).join(", ");
+  fresh.log.unshift({ t: Date.now(), msg: `Cat Nap ${persistents.prestigeCount}. Returning: ${roster}.` });
 
   gameState = fresh;
   checkAchievements();
   saveStateNow();
-  return { ok: true, earned, veteranLevel: kept.veteranLevel };
+  return { ok: true, earned, keptCount: keptCats.length };
 }
 
 // Perk cost may be a static number (legacy) or a function(state). Single call site lives here.

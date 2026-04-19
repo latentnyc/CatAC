@@ -27,6 +27,21 @@ function clubMax()  { return (gameState?.eternalPerks?.clubMax)  || INITIAL_CLUB
 const STRAY_BASE_CHANCE = 0.03;  // per mission — intentionally low; bumped by consumables
 const STRAY_TIER_BONUS  = 0.002; // per tier above 1
 
+// Cat Bonds — cats that run this many missions together gain a Bond. Bonded pairs in the same
+// party each give a small party-score + loot bump (additive per bonded pair).
+const BOND_THRESHOLD      = 10;
+const BOND_SCORE_BONUS    = 3;
+const BOND_LOOT_PCT_BONUS = 0.02;
+
+// Golden Mouse — rare random events that fire on mission resolve. Player picks one of a few
+// choices (or passes). Low chance, non-irritating: never interrupts, always meaningful.
+const GOLDEN_MOUSE_CHANCE = 0.03; // 3% per non-failed resolve
+const GOLDEN_MOUSE_CHOICES = [
+  { id: "chase",   label: "Chase",   desc: "Spend 3\uD83D\uDC1F for +2 rarity shift on the next mission.", cost: { fishes: 3 }, apply: () => { gameState.pendingRarityShift = (gameState.pendingRarityShift || 0) + 2; logEvent("\u{1F9C0} You chased the mouse! +2 rarity shift next mission."); } },
+  { id: "pounce",  label: "Pounce",  desc: "Spend 2\uD83C\uDF80 for +10\uD83C\uDF80 immediately (risky gamble).", cost: { treaties: 2 }, apply: () => { gameState.treaties = (gameState.treaties || 0) + 10; logEvent("\u{1F9C0} You pounced! +10\uD83C\uDF80."); } },
+  { id: "admire",  label: "Admire",  desc: "Watch it pass. Gain +1\uD83C\uDF80 as a keepsake.", cost: {}, apply: () => { gameState.treaties = (gameState.treaties || 0) + 1; logEvent("\u{1F9C0} The mouse glitters and is gone. +1\uD83C\uDF80."); } }
+];
+
 // Each equipped item with a matching-element tag adds this to the mission success score.
 const ELEMENT_BONUS_BY_RARITY = { common: 1, rare: 1, epic: 2, legendary: 3 };
 
@@ -350,8 +365,21 @@ const ETERNAL_PERKS = [
     cost:  s => 3 + (s.eternalPerks.warmHearth || 0),
     owned: s => (s.eternalPerks.warmHearth || 0) >= 5,
     available: s => (s.eternalPerks.warmHearth || 0) < 5,
-    apply: s => { s.eternalPerks.warmHearth = (s.eternalPerks.warmHearth || 0) + 1; } }
+    apply: s => { s.eternalPerks.warmHearth = (s.eternalPerks.warmHearth || 0) + 1; } },
+  { id: "cherished", name: "Cherished Companion", icon: "\u{1F3DB}\uFE0F",
+    desc: "Keep one extra cat during Cat Nap. Stacks \u00D7 3 (max 4 kept per nap).",
+    repeatable: true, maxLevel: 3,
+    level: s => s.eternalPerks.cherished || 0,
+    cost:  s => 5 + 2 * (s.eternalPerks.cherished || 0),
+    owned: s => (s.eternalPerks.cherished || 0) >= 3,
+    available: s => (s.eternalPerks.cherished || 0) < 3,
+    apply: s => { s.eternalPerks.cherished = (s.eternalPerks.cherished || 0) + 1; } }
 ];
+
+// How many cats the player can keep on Cat Nap. Base 1, up to 4 with full Cherished Companion.
+function catNapKeepCount() {
+  return 1 + (gameState?.eternalPerks?.cherished || 0);
+}
 
 // Base trickle rate; scaled by warmHearth perk + lounge population.
 const LOUNGE_TRICKLE_XP_PER_CAT_PER_HOUR = 2;
@@ -404,7 +432,68 @@ const ACHIEVEMENTS = [
   { id: "veteranIII", name: "Elder Cat",
     desc: "Have a cat reach Veteran III or beyond.",
     reward: { treaties: 3, note: "+3\uD83C\uDF80" },
-    check: s => (s.cats || []).some(c => (c.veteranLevel || 0) >= 3) }
+    check: s => (s.cats || []).some(c => (c.veteranLevel || 0) >= 3) },
+
+  // v0.2 expansion — breadth across every system.
+  { id: "fullClub", name: "A Proper Club",
+    desc: "Fill all 16 club slots at once.",
+    reward: { treaties: 2, note: "+2\uD83C\uDF80" },
+    check: s => (s.cats || []).length >= 16 },
+  { id: "allHoods", name: "Neighborhood Patrol",
+    desc: "Clear at least one mission in every unlocked neighborhood.",
+    reward: { fishes: 20, note: "+20\uD83D\uDC1F" },
+    check: s => {
+      const cleared = s.bestiary?.hoodTiersCleared || {};
+      const unlocked = NEIGHBORHOOD_IDS.filter(id => !NEIGHBORHOODS[id].requiresPrestige || (s.prestigeCount || 0) >= NEIGHBORHOODS[id].requiresPrestige);
+      return unlocked.every(hid => Object.keys(cleared).some(k => k.startsWith(hid + "-")));
+    } },
+  { id: "t5all", name: "Seasoned Adventurer",
+    desc: "Clear a T5 mission in all 4 base neighborhoods.",
+    reward: { treaties: 4, note: "+4\uD83C\uDF80" },
+    check: s => ["park", "lake", "rooftops", "bakery"].every(hid => s.bestiary?.hoodTiersCleared?.[hid + "-t5"]) },
+  { id: "firstHook", name: "Nice Grab",
+    desc: "Hook a fishing bite successfully.",
+    reward: { fishes: 10, note: "+10\uD83D\uDC1F" },
+    check: s => (s.achievementFlags?.hookedOnce) === true },
+  { id: "fisher100", name: "Lake Regular",
+    desc: "Catch 100 fishing results (any rarity).",
+    reward: { treaties: 2, note: "+2\uD83C\uDF80" },
+    check: s => (s.fishing?.totalCaught || 0) >= 100 },
+  { id: "gardener", name: "Green Paws",
+    desc: "Harvest 25 garden plots.",
+    reward: { fishes: 15, note: "+15\uD83D\uDC1F" },
+    check: s => (s.achievementFlags?.plotsHarvested || 0) >= 25 },
+  { id: "firstBond", name: "Hearts in Sync",
+    desc: "Form your first Cat Bond.",
+    reward: { fishes: 12, note: "+12\uD83D\uDC1F" },
+    check: s => Object.values(s.catBonds || {}).some(n => n >= BOND_THRESHOLD) },
+  { id: "fullTalent", name: "Class Master",
+    desc: "Max every node in a cat's talent tree.",
+    reward: { treaties: 3, note: "+3\uD83C\uDF80" },
+    check: s => (s.cats || []).some(c => {
+      const tree = TALENT_TREES[c.breed] || [];
+      return tree.length > 0 && tree.every(n => c.talents?.[n.id]);
+    }) },
+  { id: "firstChallenge", name: "Boon Hunter",
+    desc: "Complete a Challenge and earn a Boon.",
+    reward: { nineLives: 1, note: "+1\uD83C\uDF00" },
+    check: s => Object.values(s.challengeBoons || {}).some(n => n > 0) },
+  { id: "commissionFive", name: "Commissioner",
+    desc: "Commission 5 custom missions.",
+    reward: { treaties: 2, note: "+2\uD83C\uDF80" },
+    check: s => (s.achievementFlags?.commissionsFiled || 0) >= 5 },
+  { id: "firstBoss", name: "Regicide",
+    desc: "Defeat a Weekly Boss.",
+    reward: { nineLives: 2, note: "+2\uD83C\uDF00" },
+    check: s => (s.bestiary?.bossesDefeated || 0) >= 1 },
+  { id: "nineLives100", name: "Well-Napped",
+    desc: "Accumulate 100 Nine Lives over your lifetime.",
+    reward: { treaties: 5, note: "+5\uD83C\uDF80" },
+    check: s => (s.achievementFlags?.lifetimeNineLives || 0) >= 100 },
+  { id: "goldenMouser", name: "Mouser",
+    desc: "Encounter the Golden Mouse.",
+    reward: { fishes: 10, note: "+10\uD83D\uDC1F" },
+    check: s => (s.achievementFlags?.mouseSeen) === true }
 ];
 
 // Party synergies — conditional bonuses that activate when specific class combos are present.

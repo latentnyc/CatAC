@@ -54,6 +54,11 @@ function freshRunShell(persistents, starter, initialGold) {
     stargazing:       { signId: null, dayKey: null, assignedCatId: null, lastXpDay: null },
     pendingRarityShift: 0, // consumed by the next mission start
     lastLoungeTrickle: null, // ms timestamp for dynasty XP batching
+    // Cat Bonds — map of "idA|idB" (sorted) to co-mission count. Persists across prestige so
+    // kept-cat pairs keep their history; pairs with retired cats stay in the map but go dormant.
+    catBonds:         persistents.catBonds         || {},
+    // Golden Mouse event queue — events appear as modals; ephemeral per run (reset on Nap).
+    goldenMouseQueue: [],
     // First-run onboarding: welcome modal shows once, auto-opened panels stay remembered.
     tutorialSeen:     persistents.tutorialSeen     || false,
     uiAutoOpened:     persistents.uiAutoOpened     || {},
@@ -143,6 +148,8 @@ function loadState() {
     if (typeof parsed.stargazing.lastXpDay === "undefined") parsed.stargazing.lastXpDay = null;
     if (typeof parsed.pendingRarityShift !== "number") parsed.pendingRarityShift = 0;
     if (typeof parsed.lastLoungeTrickle === "undefined") parsed.lastLoungeTrickle = null;
+    parsed.catBonds = parsed.catBonds || {};
+    parsed.goldenMouseQueue = parsed.goldenMouseQueue || [];
     if (typeof parsed.tutorialSeen !== "boolean") parsed.tutorialSeen = false;
     parsed.uiAutoOpened = parsed.uiAutoOpened || {};
 
