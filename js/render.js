@@ -1729,6 +1729,15 @@ function tickActiveBars() {
   // Skip entirely if fishing is still locked; the panel shows a static locked message.
   const cast = isFishingUnlocked() ? gameState.fishing?.cast : null;
   const panel = document.querySelector("#fishing-panel");
+  // Bite-state transitions re-render the panel. Crucially we check this OUTSIDE the
+  // `if (cast && ...)` block so the "missed → none" transition (cast finishes and
+  // resolves) is caught — otherwise the UI froze on "Reeling slowly…" forever.
+  if (panel) {
+    const biteState = fishingBiteState(now);
+    if (panel.dataset.biteState !== biteState) {
+      renderFishing();
+    }
+  }
   const fillEl = panel?.querySelector(".fish-bar-fill");
   const etaEl  = panel?.querySelector(".fish-eta");
   if (cast && fillEl && etaEl) {
@@ -1736,12 +1745,6 @@ function tickActiveBars() {
     fillEl.style.width = pct + "%";
     const remaining = Math.max(0, (cast.startedAt + cast.durationMs) - now);
     etaEl.textContent = remaining ? `Nibbling \u00B7 ${formatMs(remaining)}` : "Reeling\u2026";
-    // Bite-state switching: if the UI's cached state doesn't match the real state, re-render
-    // so the button morphs to HOOK! / back to Watching… without redrawing every frame.
-    const biteState = fishingBiteState(now);
-    if (panel.dataset.biteState !== biteState) {
-      renderFishing();
-    }
   }
   // Garden plot bars — same idea.
   for (let i = 0; i < (gameState.garden?.plots?.length || 0); i++) {
