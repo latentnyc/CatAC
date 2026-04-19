@@ -191,6 +191,8 @@ function maybeQueueGoldenMouse(outcome) {
   gameState.goldenMouseQueue.push({ id: uid(), at: Date.now() });
   gameState.achievementFlags = gameState.achievementFlags || {};
   gameState.achievementFlags.mouseSeen = true;
+  gameState.stats = gameState.stats || {};
+  gameState.stats.mousesSeen = (gameState.stats.mousesSeen || 0) + 1;
 }
 
 // Apply a chosen Golden Mouse effect. Returns { ok, reason } — reason for "can't afford".
@@ -1800,6 +1802,13 @@ function resolveMission(active) {
   recordChallengeProgress(active, mission, outcome);
   maybeQueueGoldenMouse(outcome);
 
+  // Lifetime stats — feeds the Stats Dashboard + the achievements v2 set.
+  gameState.stats = gameState.stats || { missionsRun: 0, missionsCrit: 0, missionsFail: 0, legendariesFound: 0, mousesSeen: 0, consumablesBought: 0, firstStartedAt: Date.now() };
+  gameState.stats.missionsRun++;
+  if (outcome === "crit") gameState.stats.missionsCrit++;
+  if (outcome === "fail") gameState.stats.missionsFail++;
+  gameState.stats.legendariesFound += items.filter(it => it.rarity === "legendary").length;
+
   // Club XP: 5% of each cat's xpReward contribution feeds the club pool.
   grantClubXp(Math.max(1, Math.floor(xpPerCat * cats.length * 0.05)));
 
@@ -2054,6 +2063,42 @@ function pickLowestUncapped(cat, pool) {
 
 // --- Inventory / roster -------------------------------------------------
 
+// Per-cat "equip best" helper. For each slot, finds the single best-scoring unequipped
+// item (or already-equipped-on-this-cat) and equips it. Score = sum of stat bonuses,
+// breaking ties by rarity. Never equips an item that's equipped on a DIFFERENT cat.
+// Returns { ok, changed } — changed is the number of slots updated.
+function equipBestForCat(catId) {
+  const cat = findCat(catId);
+  if (!cat) return { ok: false, reason: "No such cat." };
+  if (cat.status === "mission") return { ok: false, reason: "Cat is on a mission." };
+  const rarityRank = { legendary: 4, epic: 3, rare: 2, common: 1 };
+  const score = item => {
+    const sum = Object.values(item.bonus).reduce((s, v) => s + v, 0);
+    return sum * 10 + (rarityRank[item.rarity] || 0);
+  };
+  let changed = 0;
+  for (const slot of ITEM_SLOTS) {
+    // Candidate pool: items of this slot type that are either unequipped or already on this cat.
+    const candidates = gameState.inventory.filter(i => {
+      if (i.type !== slot) return false;
+      if (!isItemEquipped(i.id)) return true;
+      return cat.equipped[slot] === i.id; // already on this cat counts
+    });
+    if (!candidates.length) continue;
+    candidates.sort((a, b) => score(b) - score(a));
+    const best = candidates[0];
+    if (cat.equipped[slot] !== best.id) {
+      cat.equipped[slot] = best.id;
+      changed++;
+    }
+  }
+  if (changed) {
+    logEvent(`${cat.name} geared up: ${changed} slot${changed > 1 ? "s" : ""} optimized.`);
+    requestSave();
+  }
+  return { ok: true, changed };
+}
+
 function equipItem(catId, itemId) {
   const cat = findCat(catId);
   const item = findItem(itemId);
@@ -2202,6 +2247,7 @@ function buyStraySummons() {
   if (!canAfford(item.cost)) return { ok: false, reason: "Not enough treaties." };
   payCost(item.cost);
   gameState.shop.pendingStraySummons++;
+  gameState.stats = gameState.stats || {}; gameState.stats.consumablesBought = (gameState.stats.consumablesBought || 0) + 1;
   logEvent(`Stray Summons stashed. Total pending: ${gameState.shop.pendingStraySummons}.`);
   requestSave();
   return { ok: true };
@@ -2215,6 +2261,7 @@ function buyStrayConsumable(shopItemId) {
   // Research "Alchemy" doubles the pending stray bonus added per consumable.
   const amount = shopItem.strayBonus * researchStrayConsumableMul();
   gameState.shop.pendingStrayBonus = (gameState.shop.pendingStrayBonus || 0) + amount;
+  gameState.stats = gameState.stats || {}; gameState.stats.consumablesBought = (gameState.stats.consumablesBought || 0) + 1;
   logEvent(`${shopItem.name} stashed. Next mission stray bonus: +${Math.round(gameState.shop.pendingStrayBonus * 100)}%.`);
   requestSave();
   return { ok: true };
@@ -2287,6 +2334,63 @@ function buyKittenFormula(catId, newBreedId) {
   logEvent(`${cat.name} drank Kitten Formula. ${oldLabel} \u2192 ${breed.classLabel} (reset to Lv 1).`);
   requestSave();
   return { ok: true };
+}
+
+// --- Mission queue ------------------------------------------------------
+
+// Append a mission to the queue. Cats don't need to be idle yet — the queue is processed
+// each tick, so entries fire as soon as their cats come home. autoRepeat flag propagates.
+function queueMission(catIds, neighborhoodId, tier, searchForStrays, opts) {
+  opts = opts || {};
+  if (!Array.isArray(catIds) || !catIds.length) return { ok: false, reason: "No cats selected." };
+  if (!isTierUnlocked(tier)) return { ok: false, reason: "Tier locked." };
+  // Validate cats exist; they can be busy — queue just waits.
+  for (const id of catIds) if (!findCat(id)) return { ok: false, reason: "Missing cat." };
+  gameState.missionQueue = gameState.missionQueue || [];
+  gameState.missionQueue.push({
+    id: uid(),
+    catIds: [...catIds],
+    neighborhoodId, tier,
+    searchForStrays: !!searchForStrays,
+    autoRepeat: !!opts.autoRepeat,
+    catAbilities: opts.catAbilities || {}
+  });
+  const hood = NEIGHBORHOODS[neighborhoodId];
+  const names = catIds.map(id => findCat(id)?.name).filter(Boolean).join(", ");
+  logEvent(`Queued: T${tier} ${hood?.name || neighborhoodId} for ${names}.`);
+  requestSave();
+  return { ok: true };
+}
+
+function cancelQueuedMission(id) {
+  const q = gameState.missionQueue || [];
+  const idx = q.findIndex(e => e.id === id);
+  if (idx < 0) return { ok: false, reason: "Queued mission not found." };
+  q.splice(idx, 1);
+  requestSave();
+  return { ok: true };
+}
+
+// Advance the queue: walk entries in order, starting any whose cats are ALL idle + whose
+// tier is still unlocked. Bails at the first blocked entry so order is preserved.
+function tickMissionQueue() {
+  const q = gameState.missionQueue || [];
+  if (!q.length) return;
+  while (q.length) {
+    const head = q[0];
+    if (!isTierUnlocked(head.tier)) { q.shift(); logEvent(`Queued T${head.tier} ${NEIGHBORHOODS[head.neighborhoodId]?.name} dropped (tier re-locked).`); continue; }
+    const allIdle = head.catIds.every(id => { const c = findCat(id); return c && c.status === "idle"; });
+    if (!allIdle) break; // head is waiting; everything behind it waits too
+    q.shift();
+    const r = startMission(head.catIds, head.neighborhoodId, head.tier, head.searchForStrays,
+      { autoRepeat: head.autoRepeat, catAbilities: head.catAbilities });
+    if (!r.ok) {
+      // Something broke (cat retired mid-wait, etc). Log and keep going.
+      logEvent(`Queued mission couldn't start: ${r.reason}`);
+    }
+    // Start one per tick cycle so multiple starts feel distinct in the log.
+    break;
+  }
 }
 
 // Turn off auto-repeat on whichever mission this cat is currently running. Missions share
@@ -2466,7 +2570,9 @@ function prestige(keepCatIdOrIds) {
     // Patron is a meta-faction commitment; it persists across every prestige.
     patronId:         gameState.patronId,
     // Research carries over — both completed nodes and any in-progress timer.
-    research:         gameState.research
+    research:         gameState.research,
+    // Lifetime stats counters carry across prestige (career-wide totals).
+    stats:            gameState.stats
   };
   // freshRunShell takes one starter; pass the first kept cat and splice the rest in after.
   const fresh = freshRunShell(persistents, keptCats[0], persistents.eternalPerks.headStartGold || 0);
@@ -2544,6 +2650,8 @@ function tick() {
   tickLoungeTrickle(now);
   // Research completes passively based on real time. Completion implies UI state changed.
   const researched = tickResearch(now);
+  // Advance the mission queue — starts any queued mission whose party is fully idle.
+  tickMissionQueue();
   gameState.lastTick = now;
   // Expose both so main.js can decide whether to re-render.
   resolved._research = researched;

@@ -828,7 +828,9 @@ h2 {
 }
 .active-row {
   display: grid;
-  grid-template-columns: minmax(200px, 2fr) minmax(200px, 1fr) 2fr 80px;
+  /* 5th column reserved for optional come-home button on auto-repeating missions.
+     `auto` keeps it collapsed to 0 when the row has no button. */
+  grid-template-columns: minmax(200px, 2fr) minmax(200px, 1fr) 2fr 80px auto;
   gap: 12px;
   align-items: center;
   background: var(--bg-panel-2);
@@ -1611,6 +1613,85 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
   background: #1f1f22; color: #eee; border: 1px solid #3a3a3e;
   padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer;
 }
+
+/* --- Stats dashboard --- */
+#stats-panel .stats-grid-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#stats-panel .stats-row {
+  display: contents;
+}
+#stats-panel .stats-k { color: #888; padding: 2px 0; }
+#stats-panel .stats-v { color: #eee; text-align: right; font-weight: 600; padding: 2px 0; }
+
+/* --- Party presets in mission picker --- */
+.picker-presets {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px; margin: 6px 0;
+  background: #1a1a1e; border: 1px dashed #2a2a2e; border-radius: 4px;
+  font-size: 11px;
+}
+.picker-preset {
+  display: grid; grid-template-columns: 70px 1fr auto auto; gap: 6px; align-items: center;
+}
+.picker-preset-label { font-weight: 600; color: #a890ff; }
+.picker-preset-names {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.picker-preset-btn {
+  padding: 2px 8px; background: #2a2a2e; color: #eee; border: 1px solid #3a3a3e;
+  border-radius: 3px; cursor: pointer; font-size: 10px; white-space: nowrap;
+}
+.picker-preset-btn:hover:not(:disabled) { background: #3a3a3e; }
+.picker-preset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.picker-preset-btn-single { grid-column: 3 / 5; }
+
+/* --- Bulk equip button on cat card --- */
+.bulk-equip-btn {
+  background: transparent; color: #8a9aa0; border: none;
+  padding: 2px 4px; cursor: pointer; font-size: 13px; line-height: 1;
+  border-radius: 3px;
+}
+.bulk-equip-btn:hover { background: #2a2a2e; color: #eee; }
+
+/* Come-home control on an active mission row (one per mission, unambiguous for multi-cat) */
+.active-come-home {
+  padding: 3px 10px;
+  font-size: 11px;
+  background: #3a2828;
+  color: #e8a88a;
+  border: 1px solid #5a3a3a;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  justify-self: end;
+  transition: background 0.15s, color 0.15s;
+}
+.active-come-home:hover { background: #5a3a3a; color: #ffcfa0; }
+
+/* --- Queued missions in active strip --- */
+.queued-row {
+  opacity: 0.75;
+  background: repeating-linear-gradient(
+    135deg, var(--bg-panel-2), var(--bg-panel-2) 10px,
+    color-mix(in srgb, var(--bg-panel-2) 96%, var(--bg-panel)) 10px,
+    color-mix(in srgb, var(--bg-panel-2) 96%, var(--bg-panel)) 20px
+  );
+}
+.queued-fill {
+  width: 0 !important;
+  background: transparent !important;
+}
+.queue-cancel-btn {
+  padding: 1px 6px; background: #3a2a2a; color: #e88a8a;
+  border: 1px solid #5a3a3a; border-radius: 3px; cursor: pointer;
+  font-size: 11px;
+}
+.queue-cancel-btn:hover { background: #5a3a3a; color: #ffcfa0; }
 
 /* --- Feedback link in top bar --- */
 .feedback-link {

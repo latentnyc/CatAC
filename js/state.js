@@ -62,6 +62,15 @@ function freshRunShell(persistents, starter, initialGold) {
     // Research — long-horizon tech tree. `active` is a real-time timer; `completed` is a
     // permanent set. Both persist across prestige so investment pays off forever.
     research:         persistents.research         || { active: null, completed: {} },
+    // Lifetime counters for the Stats Dashboard. Persist across prestige so numbers grow
+    // across the whole player career. Only additive — never decremented.
+    stats:            persistents.stats            || { missionsRun: 0, missionsCrit: 0, missionsFail: 0, legendariesFound: 0, mousesSeen: 0, consumablesBought: 0, firstStartedAt: Date.now() },
+    // Party loadout presets — up to 3 named 4-cat configs, per-run since cats don't
+    // usually survive prestige. freshRunShell resets this to empty.
+    partyPresets:     [null, null, null],
+    // Mission queue — { id, catIds, neighborhoodId, tier, searchForStrays }. Tick advances
+    // the queue when its lead entry's cats are all idle and the tier is still unlocked.
+    missionQueue:     [],
     // Golden Mouse event queue — events appear as modals; ephemeral per run (reset on Nap).
     goldenMouseQueue: [],
     // First-run onboarding: welcome modal shows once, auto-opened panels stay remembered.
@@ -159,6 +168,14 @@ function loadState() {
     if (!parsed.research) parsed.research = { active: null, completed: {} };
     parsed.research.completed = parsed.research.completed || {};
     if (typeof parsed.research.active === "undefined") parsed.research.active = null;
+    if (!parsed.stats) parsed.stats = { missionsRun: 0, missionsCrit: 0, missionsFail: 0, legendariesFound: 0, mousesSeen: 0, consumablesBought: 0, firstStartedAt: Date.now() };
+    for (const k of ["missionsRun", "missionsCrit", "missionsFail", "legendariesFound", "mousesSeen", "consumablesBought"]) {
+      if (typeof parsed.stats[k] !== "number") parsed.stats[k] = 0;
+    }
+    if (typeof parsed.stats.firstStartedAt !== "number") parsed.stats.firstStartedAt = Date.now();
+    if (!Array.isArray(parsed.partyPresets)) parsed.partyPresets = [null, null, null];
+    while (parsed.partyPresets.length < 3) parsed.partyPresets.push(null);
+    if (!Array.isArray(parsed.missionQueue)) parsed.missionQueue = [];
     if (typeof parsed.tutorialSeen !== "boolean") parsed.tutorialSeen = false;
     parsed.uiAutoOpened = parsed.uiAutoOpened || {};
 

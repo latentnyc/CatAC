@@ -286,6 +286,7 @@ function renderParty() {
           <div class="cat-head-actions">
             <button class="talent-btn" title="Open talent tree" aria-label="Talents">\u{1F9E0}</button>
             <button class="stat-choice-btn" title="Stat choice available" aria-label="Stat choice">\u2605</button>
+            <button class="bulk-equip-btn" title="Auto-equip best gear in each slot" aria-label="Equip best">\u2699\uFE0F</button>
             <button class="retire-btn" title="Retire to the Cat Lounge" aria-label="Retire">\u{1F3E1}</button>
           </div>
         </div>
@@ -1229,6 +1230,53 @@ function openStationAssignPicker(stationId) {
   $("#modal").classList.add("open");
 }
 
+// --- Stats dashboard ----------------------------------------------------
+
+function renderStats() {
+  const host = $("#stats-panel");
+  if (!host) return;
+  const s = gameState.stats || {};
+  const missions = s.missionsRun || 0;
+  const crits    = s.missionsCrit || 0;
+  const fails    = s.missionsFail || 0;
+  const successes = Math.max(0, missions - crits - fails);
+  const critRate  = missions ? Math.round(100 * crits / missions) : 0;
+  const failRate  = missions ? Math.round(100 * fails / missions) : 0;
+
+  const elapsedMs = Date.now() - (s.firstStartedAt || Date.now());
+  const hours = Math.floor(elapsedMs / (60 * 60 * 1000));
+  const mins  = Math.floor((elapsedMs % (60 * 60 * 1000)) / (60 * 1000));
+  const playtime = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+  const totalBonds = Object.values(gameState.catBonds || {}).filter(n => n >= BOND_THRESHOLD).length;
+  const researchDone = Object.keys(gameState.research?.completed || {}).length;
+  const bestiaryTotal = BESTIARY.reduce((sum, c) => sum + Math.min(c.count(gameState), c.total()), 0);
+  const bestiaryGoal  = BESTIARY.reduce((sum, c) => sum + c.total(), 0);
+
+  // Compact grid layout: label + formatted value per row.
+  const rows = [
+    ["Playtime",            playtime],
+    ["Missions run",        formatNumber(missions)],
+    ["Crit rate",           `${critRate}% (${formatNumber(crits)})`],
+    ["Fail rate",           `${failRate}% (${formatNumber(fails)})`],
+    ["Legendaries found",   formatNumber(s.legendariesFound || 0)],
+    ["Lifetime gold",       `${formatNumber(gameState.cumulativeGold || 0)}\uD83D\uDCB0`],
+    ["Prestiges",           formatNumber(gameState.prestigeCount || 0)],
+    ["Highest tier",        `T${gameState.highestTier || 0}`],
+    ["Club level",          `Lv ${gameState.clubLevel || 1}`],
+    ["Cats retired",        formatNumber((gameState.loungeCats || []).length)],
+    ["Bonds formed",        formatNumber(totalBonds)],
+    ["Research complete",   `${researchDone} / ${RESEARCH_NODES.length}`],
+    ["Bestiary progress",   `${formatNumber(bestiaryTotal)} / ${formatNumber(bestiaryGoal)}`],
+    ["Consumables bought",  formatNumber(s.consumablesBought || 0)],
+    ["Mouse sightings",     formatNumber(s.mousesSeen || 0)]
+  ];
+  host.innerHTML = `
+    <div class="stats-grid-rows">
+      ${rows.map(([k, v]) => `<div class="stats-row"><span class="stats-k">${escapeHtml(k)}</span><span class="stats-v">${v}</span></div>`).join("")}
+    </div>`;
+}
+
 // --- Research panel -----------------------------------------------------
 
 function renderResearch() {
@@ -1611,7 +1659,8 @@ function renderLog() {
 
 function renderActiveMissions() {
   const host = $("#missions-active-panel");
-  if (!gameState.missions.length) {
+  const queue = gameState.missionQueue || [];
+  if (!gameState.missions.length && !queue.length) {
     host.innerHTML = `<div class="empty-state">No active missions.</div>`;
     return;
   }
@@ -1622,11 +1671,31 @@ function renderActiveMissions() {
     const row = document.createElement("div");
     row.className = "active-row";
     row.dataset.activeId = m.id;
+    // Per-mission "Come Home" button lives here too — natural for multi-cat parties
+    // where the per-cat button is ambiguous ("which card do I click?"). Uses the same
+    // cancelAutoRepeat plumbing; this button just targets any cat on the mission.
+    const comeHomeBtn = m.autoRepeat && cats.length
+      ? `<button class="active-come-home" data-active-come-home="${m.id}" title="Stop auto-repeat \u2014 this party comes home after the current mission.">\uD83C\uDFE0 come home</button>`
+      : "";
     row.innerHTML = `
       <div class="active-party">${escapeHtml(cats.map(c => c.name).join(", ")) || "?"}</div>
       <div class="active-mission" style="--hood-color: ${hood.color}">${hood.icon} T${m.tier} ${hood.name}</div>
       <div class="active-bar"><div class="active-fill"></div></div>
-      <div class="active-eta"></div>`;
+      <div class="active-eta"></div>
+      ${comeHomeBtn}`;
+    host.appendChild(row);
+  }
+  // Queued missions appear below active ones with a "cancel" handle.
+  for (const q of queue) {
+    const hood = NEIGHBORHOODS[q.neighborhoodId];
+    const cats = q.catIds.map(findCat).filter(Boolean);
+    const row = document.createElement("div");
+    row.className = "active-row queued-row";
+    row.innerHTML = `
+      <div class="active-party muted">${escapeHtml(cats.map(c => c.name).join(", ")) || "?"}</div>
+      <div class="active-mission muted" style="--hood-color: ${hood.color}">${hood.icon} T${q.tier} ${hood.name}</div>
+      <div class="active-bar"><div class="active-fill queued-fill"></div></div>
+      <div class="active-eta"><button class="queue-cancel-btn" data-queue-cancel="${q.id}" title="Remove from queue">\u2715</button></div>`;
     host.appendChild(row);
   }
 }
@@ -1922,6 +1991,33 @@ function renderPicker() {
     ? `<button class="picker-last-party" id="picker-last-party">\u21BA Use last party (${lastParty.length})</button>`
     : "";
 
+  // Party presets — three slots, each independently save/load/clear.
+  const presets = gameState.partyPresets || [null, null, null];
+  const currentSize = p.selected.size;
+  const presetRows = [0, 1, 2].map(i => {
+    const preset = presets[i];
+    if (preset && preset.catIds?.length) {
+      // Show how many of this preset's cats are currently loadable (idle + in roster).
+      const loadable = preset.catIds.filter(id => {
+        const c = findCat(id);
+        return c && c.status === "idle";
+      }).length;
+      const names = preset.catIds.map(id => findCat(id)?.name).filter(Boolean).join(", ") || "(cats retired)";
+      return `<div class="picker-preset">
+        <span class="picker-preset-label">Preset ${i + 1}:</span>
+        <span class="picker-preset-names muted" title="${escapeHtml(names)}">${escapeHtml(names)}</span>
+        <button class="picker-preset-btn" data-preset-load="${i}" ${loadable ? "" : "disabled"}>Load (${loadable})</button>
+        <button class="picker-preset-btn" data-preset-save="${i}" ${currentSize ? "" : "disabled"} title="Overwrite with current selection">Save</button>
+      </div>`;
+    }
+    return `<div class="picker-preset">
+      <span class="picker-preset-label">Preset ${i + 1}:</span>
+      <span class="picker-preset-names muted">empty</span>
+      <button class="picker-preset-btn picker-preset-btn-single" data-preset-save="${i}" ${currentSize ? "" : "disabled"}>Save current</button>
+    </div>`;
+  }).join("");
+  const presetBlock = `<div class="picker-presets">${presetRows}</div>`;
+
   body.innerHTML = `
     <h3>${hood.icon} T${p.tier} ${hood.name}</h3>
     <p class="muted">Check: ${mission.primaryChecks.map(s => STAT_LABELS[s]).join(" / ")} · Duration ${formatDuration(mission.duration)} · Party 1\u2013${partyMax()}</p>
@@ -1934,11 +2030,13 @@ function renderPicker() {
     ${setBlock}
     ${hazardBlock}
     ${lastPartyLink}
+    ${presetBlock}
     <div class="picker-list">${catRows || '<div class="empty-state">No idle cats available.</div>'}</div>
     ${strayToggle}
     ${autoRepeatToggle}
     <div class="modal-actions">
       <button data-modal-close>Cancel</button>
+      ${(p.isDaily || p.isBoss || p.isCommission) ? "" : `<button id="picker-queue" ${selectedIds.length ? "" : "disabled"} title="Add this mission to the end of the queue — fires once these cats are idle.">Queue</button>`}
       <button class="btn-primary" id="picker-start" ${selectedIds.length ? "" : "disabled"}>Send party</button>
     </div>`;
 }
@@ -2251,6 +2349,7 @@ function renderAll() {
   renderGarden();
   renderPatron();
   renderResearch();
+  renderStats();
   renderChallenges();
   renderMastery();
   renderBestiary();
@@ -2386,6 +2485,36 @@ function wireEvents(onMutation) {
       return;
     }
 
+    // Party preset save — snapshots the current selection into slot N.
+    const presetSaveBtn = t.closest("[data-preset-save]");
+    if (presetSaveBtn && !presetSaveBtn.disabled) {
+      const p = uiState.picker;
+      if (!p || !p.selected.size) return;
+      const idx = parseInt(presetSaveBtn.dataset.presetSave, 10);
+      gameState.partyPresets = gameState.partyPresets || [null, null, null];
+      gameState.partyPresets[idx] = { catIds: Array.from(p.selected) };
+      requestSave();
+      renderPicker();
+      return;
+    }
+
+    // Party preset load — replaces the selection with the preset's cats that are still
+    // idle. Gracefully drops retired or stationed cats.
+    const presetLoadBtn = t.closest("[data-preset-load]");
+    if (presetLoadBtn && !presetLoadBtn.disabled) {
+      const p = uiState.picker;
+      const idx = parseInt(presetLoadBtn.dataset.presetLoad, 10);
+      const preset = gameState.partyPresets?.[idx];
+      if (!p || !preset) return;
+      p.selected = new Set();
+      for (const id of preset.catIds) {
+        const c = findCat(id);
+        if (c && c.status === "idle" && p.selected.size < partyMax()) p.selected.add(id);
+      }
+      renderPicker();
+      return;
+    }
+
     // Use last party shortcut
     if (t.id === "picker-last-party") {
       const p = uiState.picker;
@@ -2412,6 +2541,29 @@ function wireEvents(onMutation) {
       if (p.abilityActivations[catId]) delete p.abilityActivations[catId];
       else p.abilityActivations[catId] = ability.id;
       renderPicker();
+      return;
+    }
+
+    // Mission picker: Queue — append to missionQueue instead of starting now.
+    // Only offered for regular tier missions (synthetics can't queue).
+    if (t.id === "picker-queue" && !t.disabled) {
+      const p = uiState.picker;
+      const catAbilities = {};
+      for (const id of p.selected) {
+        if (p.abilityActivations?.[id]) catAbilities[id] = p.abilityActivations[id];
+      }
+      const r = queueMission(Array.from(p.selected), p.neighborhoodId, p.tier, p.searchForStrays, { autoRepeat: !!p.autoRepeat, catAbilities });
+      if (!r.ok) { alert(r.reason); return; }
+      closeModal();
+      onMutation();
+      return;
+    }
+
+    // Cancel a queued mission from the Active Missions footer.
+    const queueCancelBtn = t.closest("[data-queue-cancel]");
+    if (queueCancelBtn) {
+      const r = cancelQueuedMission(queueCancelBtn.dataset.queueCancel);
+      if (!r.ok) alert(r.reason); else onMutation();
       return;
     }
 
@@ -2746,6 +2898,19 @@ function wireEvents(onMutation) {
       return;
     }
 
+    // Same cancel, but on the Active Missions strip — one row per mission, so multi-cat
+    // parties have a single unambiguous click target.
+    const activeComeHome = t.closest("[data-active-come-home]");
+    if (activeComeHome) {
+      const missionId = activeComeHome.dataset.activeComeHome;
+      const mission = gameState.missions.find(m => m.id === missionId);
+      if (mission && mission.catIds?.length) {
+        const r = cancelAutoRepeat(mission.catIds[0]);
+        if (!r.ok) alert(r.reason); else onMutation();
+      }
+      return;
+    }
+
     // Cat name click — inline rename via prompt (keeps UX simple, no modal/form needed).
     const nameEl = t.closest(".cat-name");
     if (nameEl) {
@@ -2801,6 +2966,21 @@ function wireEvents(onMutation) {
         else closeModal();
         onMutation();
       }
+      return;
+    }
+
+    // Bulk equip best — picks the highest-scoring item per slot from inventory.
+    const bulkEquipBtn = t.closest(".bulk-equip-btn");
+    if (bulkEquipBtn) {
+      const card = bulkEquipBtn.closest(".cat-card");
+      const catId = card?.dataset.catId;
+      if (!catId) return;
+      const r = equipBestForCat(catId);
+      if (!r.ok) alert(r.reason);
+      else if (r.changed === 0) {
+        // Silent no-op if everything was already optimal.
+      }
+      onMutation();
       return;
     }
 
@@ -2889,7 +3069,34 @@ function wireEvents(onMutation) {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModal();
+    // Skip all shortcuts while the user is typing (input / textarea / contenteditable).
+    // Also skip when any modifier except shift is pressed so we don't hijack browser keys.
+    const target = e.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    if (e.key === "Escape") { closeModal(); return; }
+
+    // Enter confirms the modal's primary button if it exists + is enabled.
+    if (e.key === "Enter") {
+      const primary = document.querySelector("#modal.open .btn-primary:not(:disabled), #modal.open #picker-start:not(:disabled), #modal.open #welcome-dismiss, #modal.open #cat-nap-confirm:not(:disabled), #modal.open #commission-dispatch:not(:disabled)");
+      if (primary) { e.preventDefault(); primary.click(); return; }
+    }
+
+    // Number keys 1-6 switch neighborhood tabs. Only applies when no modal is open so
+    // hitting "1" in a picker input doesn't yank you elsewhere (the input check above
+    // also covers typing fields).
+    const modalOpen = document.querySelector("#modal.open");
+    if (!modalOpen && /^[1-6]$/.test(e.key)) {
+      const idx = parseInt(e.key, 10) - 1;
+      const unlocked = unlockedNeighborhoodIds();
+      if (unlocked[idx]) {
+        uiState.activeNeighborhood = unlocked[idx];
+        renderNeighborhoodTabs();
+        renderMissions();
+        e.preventDefault();
+      }
+    }
   });
 }
 

@@ -507,7 +507,79 @@ const ACHIEVEMENTS = [
   { id: "goldenMouser", name: "Mouser",
     desc: "Encounter the Golden Mouse.",
     reward: { fishes: 10, note: "+10\uD83D\uDC1F" },
-    check: s => (s.achievementFlags?.mouseSeen) === true }
+    check: s => (s.achievementFlags?.mouseSeen) === true },
+
+  // v0.4 expansion — late-game depth + breadth across all systems.
+  { id: "goldHoarder", name: "Gold Hoarder",
+    desc: "Have 100,000\uD83D\uDCB0 at once.",
+    reward: { treaties: 3, note: "+3\uD83C\uDF80" },
+    check: s => (s.gold || 0) >= 100000 },
+  { id: "fishMagnate", name: "Fish Magnate",
+    desc: "Have 500\uD83D\uDC1F at once.",
+    reward: { treaties: 2, note: "+2\uD83C\uDF80" },
+    check: s => (s.fishes || 0) >= 500 },
+  { id: "treatyTrove", name: "Treaty Trove",
+    desc: "Have 50\uD83C\uDF80 at once.",
+    reward: { nineLives: 1, note: "+1\uD83C\uDF00" },
+    check: s => (s.treaties || 0) >= 50 },
+  { id: "veteranV", name: "Legend",
+    desc: "Own a Veteran V or higher cat.",
+    reward: { nineLives: 3, note: "+3\uD83C\uDF00" },
+    check: s => (s.cats || []).some(c => (c.veteranLevel || 0) >= 5) },
+  { id: "prestigeV", name: "Five Naps",
+    desc: "Complete 5 Cat Naps.",
+    reward: { nineLives: 3, note: "+3\uD83C\uDF00" },
+    check: s => (s.prestigeCount || 0) >= 5 },
+  { id: "patronPledged", name: "Faction Chosen",
+    desc: "Pledge to a Patron.",
+    reward: { nineLives: 2, note: "+2\uD83C\uDF00" },
+    check: s => !!s.patronId },
+  { id: "researchStarted", name: "Scholar",
+    desc: "Complete 5 Research nodes.",
+    reward: { fishes: 50, note: "+50\uD83D\uDC1F" },
+    check: s => Object.keys(s.research?.completed || {}).length >= 5 },
+  { id: "researchSage", name: "Sage",
+    desc: "Complete 10 Research nodes.",
+    reward: { treaties: 5, note: "+5\uD83C\uDF80" },
+    check: s => Object.keys(s.research?.completed || {}).length >= 10 },
+  { id: "pinnacle", name: "Pinnacle",
+    desc: "Complete every Research node.",
+    reward: { nineLives: 10, note: "+10\uD83C\uDF00" },
+    check: s => Object.keys(s.research?.completed || {}).length >= RESEARCH_NODES.length },
+  { id: "bondNetwork", name: "Friendships",
+    desc: "Form 5 different Cat Bonds.",
+    reward: { treaties: 3, note: "+3\uD83C\uDF80" },
+    check: s => Object.values(s.catBonds || {}).filter(n => n >= BOND_THRESHOLD).length >= 5 },
+  { id: "talentMaster", name: "Class Master",
+    desc: "Max every talent on three different cats.",
+    reward: { treaties: 4, note: "+4\uD83C\uDF80" },
+    check: s => {
+      let count = 0;
+      for (const c of (s.cats || [])) {
+        const tree = TALENT_TREES[c.breed] || [];
+        if (tree.length > 0 && tree.every(n => c.talents?.[n.id])) count++;
+      }
+      return count >= 3;
+    } },
+  { id: "spectrumClub", name: "Full Spectrum Club",
+    desc: "Have every class represented in the club at once.",
+    reward: { treaties: 3, note: "+3\uD83C\uDF80" },
+    check: s => {
+      const breeds = new Set((s.cats || []).map(c => c.breed));
+      return Object.keys(CAT_BREEDS).every(id => breeds.has(id));
+    } },
+  { id: "tier10", name: "The Summit",
+    desc: "Clear a T10 mission in any neighborhood.",
+    reward: { nineLives: 5, note: "+5\uD83C\uDF00" },
+    check: s => Object.keys(s.bestiary?.hoodTiersCleared || {}).some(k => k.endsWith("-t10")) },
+  { id: "loungeFull", name: "Full House",
+    desc: "Retire 25 cats to the Cat Lounge.",
+    reward: { treaties: 3, note: "+3\uD83C\uDF80" },
+    check: s => (s.loungeCats || []).length >= 25 },
+  { id: "shopSpree", name: "Regular Customer",
+    desc: "Buy 25 consumables from the Club Shop.",
+    reward: { fishes: 30, note: "+30\uD83D\uDC1F" },
+    check: s => (s.stats?.consumablesBought || 0) >= 25 }
 ];
 
 // Party synergies — conditional bonuses that activate when specific class combos are present.
