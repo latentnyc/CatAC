@@ -137,7 +137,4 @@ The in-game top bar pairs `paw-logo.svg` with the Fraunces wordmark. Old `🐾` 
 - `SKILL.md` — skill manifest, portable to Claude Code
 - `assets/` — SVG class-badges, paw logo mark, sample cat portraits (see `assets/README.md`)
 - `fonts/` — (empty — game uses system stack)
-- `preview/` — Design System tab preview cards
-- `ui_kits/game/` — pixel-accurate recreation of the Cat Adventure Club game UI
-  - `ui_kits/game/index.html` — interactive click-thru prototype
-  - `ui_kits/game/*.jsx` — React components (TopBar, CatCard, MissionCard, ShopItem, etc.)
+- `style.css` — the game's actual stylesheet (source of truth for component styles)
