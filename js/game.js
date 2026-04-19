@@ -2277,6 +2277,22 @@ function buyKittenFormula(catId, newBreedId) {
   return { ok: true };
 }
 
+// Turn off auto-repeat on whichever mission this cat is currently running. Missions share
+// one autoRepeat flag across the whole party, so any cat in the party can trigger this for
+// all of them. The current mission still resolves normally — they just don't chain.
+function cancelAutoRepeat(catId) {
+  const cat = findCat(catId);
+  if (!cat || cat.status !== "mission" || !cat.missionId) return { ok: false, reason: "Not on a mission." };
+  const mission = gameState.missions.find(m => m.id === cat.missionId);
+  if (!mission) return { ok: false, reason: "No active mission found." };
+  if (!mission.autoRepeat) return { ok: false, reason: "Auto-repeat isn't on for this mission." };
+  mission.autoRepeat = false;
+  const names = mission.catIds.map(id => findCat(id)?.name).filter(Boolean).join(", ");
+  logEvent(`${names} will come home after this mission.`);
+  requestSave();
+  return { ok: true };
+}
+
 // Rename a cat. Keeps it sensible: trim, clamp to 1-24 chars, reject empty.
 function renameCat(catId, newName) {
   const cat = findCat(catId);

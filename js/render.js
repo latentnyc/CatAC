@@ -289,7 +289,10 @@ function renderParty() {
             <button class="retire-btn" title="Retire to the Cat Lounge" aria-label="Retire">\u{1F3E1}</button>
           </div>
         </div>
-        <div class="cat-status"></div>
+        <div class="cat-status">
+          <span class="cat-status-text"></span>
+          <button class="cat-status-come-home" type="button" title="Stop auto-repeat — this party comes home after the current mission." style="display:none">🏠 come home</button>
+        </div>
         <div class="cat-level-row">
           <span class="cat-level"></span>
           <div class="xp-bar"><div class="xp-fill"></div></div>
@@ -363,16 +366,24 @@ function renderParty() {
       }
     }
 
-    const statusEl = $(".cat-status", card);
+    const statusEl   = $(".cat-status",           card);
+    const statusText = $(".cat-status-text",      card);
+    const comeHome   = $(".cat-status-come-home", card);
     if (cat.status === "mission") {
-      statusEl.textContent = "\u2694\uFE0F On mission";
+      statusText.textContent = "\u2694\uFE0F On mission";  // tickActiveBars refines this live
       statusEl.style.display = "";
+      // Show Come Home only while the current mission has auto-repeat on. Finding the
+      // mission by id is cheap; missions is always a short list.
+      const m = gameState.missions.find(x => x.id === cat.missionId);
+      comeHome.style.display = (m && m.autoRepeat) ? "" : "none";
     } else if (cat.status === "stationed") {
-      statusEl.textContent = `\uD83D\uDCCD At the ${stationLabel(cat.station)}`;
+      statusText.textContent = `\uD83D\uDCCD At the ${stationLabel(cat.station)}`;
       statusEl.style.display = "";
+      comeHome.style.display = "none";
     } else {
-      statusEl.textContent = "";
+      statusText.textContent = "";
       statusEl.style.display = "none";
+      comeHome.style.display = "none";
     }
 
     const pending = cat.pendingStatChoices || 0;
@@ -1691,15 +1702,16 @@ function tickActiveBars() {
 
   // Cat cards: show live mission ETA on the status line for cats currently out on a mission.
   // Stationed cats keep their station label (no countdown for an open-ended station post).
+  // Only mutates .cat-status-text so the adjacent "come home" button keeps its state.
   for (const cat of gameState.cats) {
     if (cat.status !== "mission" || !cat.missionId) continue;
     const m = gameState.missions.find(x => x.id === cat.missionId);
     if (!m) continue;
     const card = document.querySelector(`.cat-card[data-cat-id="${cat.id}"]`);
-    const statusEl = card?.querySelector(".cat-status");
-    if (!statusEl) continue;
+    const statusText = card?.querySelector(".cat-status-text");
+    if (!statusText) continue;
     const remaining = Math.max(0, (m.startedAt + m.durationMs) - now);
-    statusEl.textContent = remaining ? `\u2694\uFE0F ${formatDuration(remaining)}` : "\u2694\uFE0F returning\u2026";
+    statusText.textContent = remaining ? `\u2694\uFE0F ${formatDuration(remaining)}` : "\u2694\uFE0F returning\u2026";
   }
 }
 
@@ -2717,6 +2729,19 @@ function wireEvents(onMutation) {
       if (id === "tonic" && r && r.ok) {
         const catId = shopApplyBtn.dataset.shopTargetCat;
         setTimeout(() => openStatChoiceModal(catId), 10);
+      }
+      return;
+    }
+
+    // "Come home" button on a cat card — cancels auto-repeat on its active mission so
+    // the party returns after the current run. Shared flag: one click covers all party cats.
+    const comeHomeBtn = t.closest(".cat-status-come-home");
+    if (comeHomeBtn) {
+      const card = comeHomeBtn.closest(".cat-card");
+      const catId = card?.dataset.catId;
+      if (catId) {
+        const r = cancelAutoRepeat(catId);
+        if (!r.ok) alert(r.reason); else onMutation();
       }
       return;
     }
