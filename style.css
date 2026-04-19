@@ -1351,7 +1351,10 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
   font-size: 11px; color: #a890ff; padding: 2px 4px; border-radius: 3px;
   background: rgba(124, 92, 255, 0.08); margin: 2px 0 4px;
 }
-.cat-status-text { flex: 1; }
+.cat-status-text { flex: 0 0 auto; }
+/* Explicit right-align: push the button to the far right regardless of how short the
+   timer label is. margin-left:auto on a flex child is the idiomatic "press to end" move. */
+.cat-status-come-home { margin-left: auto; }
 .cat-card.stationed { box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.4); }
 .cat-card.busy .cat-status { color: #e6b85e; background: rgba(230, 184, 94, 0.08); }
 
