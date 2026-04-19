@@ -2,7 +2,7 @@
 
 A semi-idle browser game about adventuring cats. Send your cats on timed expeditions across themed neighborhoods, loot gear, level them up, and prestige via the "Cat Nap" ascension loop. Vanilla HTML/CSS/JS — no build step, no framework.
 
-**Status:** `v0.4.0` — shared with friends for feedback.
+**Status:** `v0.4.2` — shared with friends for feedback.
 
 ## ▶️ Play now
 

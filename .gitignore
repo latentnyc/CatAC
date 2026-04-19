@@ -23,3 +23,11 @@ yarn.lock
 # Throwaway smoke tests
 smoketest.js
 *.tmp
+
+# Dev tools / simulator artifacts — not shipped to GH Pages
+playthrough-sim.js
+sim-output.txt
+
+# Reference kit / scratch HTML directories — not part of the app
+ui_kits/
+preview/

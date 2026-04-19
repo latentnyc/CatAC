@@ -1799,6 +1799,10 @@ function resolveMission(active) {
       gameState.weeklyBoss.completed = true;
       const bonusNineLives = bestiaryBossNineLives();
       if (bonusNineLives > 0) gameState.nineLives = (gameState.nineLives || 0) + bonusNineLives;
+      // v0.4.2: flat +2🌀 per weekly clear, on top of any bestiary bonus. Gives a small but
+      // dependable meta-currency trickle in steady-state (one boss per week).
+      gameState.nineLives = (gameState.nineLives || 0) + 2;
+      logEvent(`\u{1F300} +2 Nine Lives for this week's boss clear.`);
       gameState.bestiary.bossesDefeated = (gameState.bestiary.bossesDefeated || 0) + 1;
       checkBestiary();
     }
@@ -1866,7 +1870,7 @@ function resolveMission(active) {
     hazardTail = ` (hazards +${effectsSummary.netPenalty} DC)`;
   }
 
-  logEvent(`${cats.map(c => c.name).join(", ")} ${verb} T${mission.tier} ${hood.name} (+${gold}💰, +${xpPerCat}xp each${fishTxt}${treatyTxt}${lootTxt})${hazardTail}`);
+  logEvent(`${cats.map(c => c.name).join(", ")} ${verb} T${mission.tier} ${hood.name} (+${formatNumber(gold)}💰, +${formatNumber(xpPerCat)}xp each${fishTxt}${treatyTxt}${lootTxt})${hazardTail}`);
 
   checkAchievements();
 
@@ -2244,8 +2248,8 @@ function payCost(cost) {
 function formatCost(cost) {
   const c = effectiveShopCost(cost);
   const parts = [];
-  if (c.gold)     parts.push(`${c.gold}\uD83D\uDCB0`);
-  if (c.fishes)   parts.push(`${c.fishes}\uD83D\uDC1F`);
+  if (c.gold)     parts.push(`${formatNumber(c.gold)}\uD83D\uDCB0`);
+  if (c.fishes)   parts.push(`${formatNumber(c.fishes)}\uD83D\uDC1F`);
   if (c.treaties) parts.push(`${c.treaties}\uD83C\uDF80`);
   return parts.join(" ");
 }
@@ -2516,6 +2520,10 @@ function checkAchievements() {
       if (r.nineLives) gameState.nineLives = (gameState.nineLives || 0) + r.nineLives;
       // Party-IV unlock is inherent: partyMax() reads achievements.packLeader.claimed directly.
       logEvent(`\uD83C\uDFC6 Achievement: ${ach.name} \u2014 ${r.note || ""}`);
+      // v0.4.2: toast the achievement so silent-reward achievements (e.g. Pinnacle's +10🌀)
+      // don't slide by unnoticed. presentQueuedFlashes() handles the render side.
+      gameState._flashQueue = gameState._flashQueue || [];
+      gameState._flashQueue.push({ type: "achievement", id: ach.id, name: ach.name, note: r.note || "" });
     }
   }
   // Piggyback on the same cadence for the first-prestige nudge.
@@ -2661,8 +2669,11 @@ function buyEternalPerk(perkId) {
 // --- Eternal Perk effect accessors ---------------------------------------
 // Read like `eternalGoldMul()` at the right hook points; never read raw eternalPerks counts
 // outside this file, so effects can be retuned here without hunting every call site.
-function eternalGoldMul()   { return 1 + ((gameState?.eternalPerks?.gildedPaw     || 0) * 0.02); }
-function eternalXpMul()     { return 1 + ((gameState?.eternalPerks?.scholarlyPurr || 0) * 0.02); }
+// v0.4.2: Gold/XP eternal perks now compound multiplicatively (1.07^lvl, max +40% at lvl 5)
+// instead of adding flat +2%. This lets the prestige loop accelerate run-over-run instead of
+// the previous anti-pattern where each subsequent prestige took LONGER than the last.
+function eternalGoldMul()   { return Math.pow(1.07, gameState?.eternalPerks?.gildedPaw     || 0); }
+function eternalXpMul()     { return Math.pow(1.07, gameState?.eternalPerks?.scholarlyPurr || 0); }
 function eternalLootPct()   { return    ((gameState?.eternalPerks?.luckyWhiskers || 0) * 0.01); }
 function eternalStrayPct()  { return    ((gameState?.eternalPerks?.openDoor      || 0) * 0.02); }
 function eternalBigHeart()  { return    (gameState?.eternalPerks?.bigHeart       || 0); }

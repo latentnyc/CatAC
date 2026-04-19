@@ -9,6 +9,12 @@ function queueStrays(resolvedList) {
 }
 
 function boot() {
+  // v0.4.2: single-source version stamping. Any DOM element with `data-version` gets
+  // "vX.Y.Z"; any `data-version-long` gets the longer "vX.Y.Z" form for settings blurbs.
+  // Keeps index.html cache-buster ?v= params as the only places the literal appears.
+  for (const el of document.querySelectorAll("[data-version]"))      el.textContent = "v" + BUILD_VERSION;
+  for (const el of document.querySelectorAll("[data-version-long]")) el.textContent = "v" + BUILD_VERSION;
+
   gameState = loadState();
   refreshDailyChallenges();
   refreshWeeklyBoss();

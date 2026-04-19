@@ -676,7 +676,7 @@ function renderMissions() {
         <div class="mission-stats">
           <span>DC ${tier.difficulty}</span>
           <span>Party 1\u2013${partyMax()}</span>
-          <span>${tier.goldRange[0]}\u2013${tier.goldRange[1]}💰${tier.fishRange[1] ? ` · up to ${tier.fishRange[1]}🐟` : ""}${tier.treatyChance ? ` · 🎀` : ""} · ${tier.xpReward} xp</span>
+          <span>${formatNumber(tier.goldRange[0])}\u2013${formatNumber(tier.goldRange[1])}💰${tier.fishRange[1] ? ` · up to ${tier.fishRange[1]}🐟` : ""}${tier.treatyChance ? ` · 🎀` : ""} · ${formatNumber(tier.xpReward)} xp</span>
         </div>
         <button class="mission-send" data-tier="${tier.tier}" ${unlocked ? "" : "disabled"} title="${unlocked ? `Open the party picker for T${tier.tier} ${hood.name}. ${formatDuration(tier.duration)} per run.` : "Locked — see requirements below the card."}">Plan</button>
       </div>
@@ -1160,7 +1160,7 @@ function renderCommissionModal() {
 
   // Tier picker — only unlocked tiers for the selected hood.
   const tierBtns = MISSION_TIERS.filter(t => isTierUnlocked(t.tier)).map(t =>
-    `<button class="commission-tier ${t.tier === c.tier ? "active" : ""}" data-commission-tier="${t.tier}" title="DC ${t.difficulty} \u00B7 ${formatDuration(t.duration)} \u00B7 ${t.goldRange[0]}\u2013${t.goldRange[1]}\uD83D\uDCB0">T${t.tier}</button>`
+    `<button class="commission-tier ${t.tier === c.tier ? "active" : ""}" data-commission-tier="${t.tier}" title="DC ${t.difficulty} \u00B7 ${formatDuration(t.duration)} \u00B7 ${formatNumber(t.goldRange[0])}\u2013${formatNumber(t.goldRange[1])}\uD83D\uDCB0">T${t.tier}</button>`
   ).join("") || `<span class="muted">No tiers unlocked yet.</span>`;
 
   // Modifier checkboxes.
@@ -1177,7 +1177,7 @@ function renderCommissionModal() {
   // Preview of the built mission for feedback.
   const preview = buildChallengeMission(c.neighborhoodId, c.tier, Array.from(c.mods));
   const previewTxt = preview
-    ? `Duration ${formatDuration(preview.duration)} · ${preview.goldRange.join("\u2013")}\uD83D\uDCB0 · up to ${preview.fishRange[1]}\uD83D\uDC1F · ${preview.xpReward}xp · ${preview.effectsActive}/${hood.effects.length} hazards${preview.lootRolls > 1 ? ` · ${preview.lootRolls}\u00D7 loot` : ""}${preview.rarityShift ? ` · +${preview.rarityShift} rarity` : ""}${preview.bonusTreaties ? ` · +${preview.bonusTreaties}\uD83C\uDF80 guaranteed` : ""}`
+    ? `Duration ${formatDuration(preview.duration)} · ${formatNumber(preview.goldRange[0])}\u2013${formatNumber(preview.goldRange[1])}\uD83D\uDCB0 · up to ${preview.fishRange[1]}\uD83D\uDC1F · ${formatNumber(preview.xpReward)}xp · ${preview.effectsActive}/${hood.effects.length} hazards${preview.lootRolls > 1 ? ` · ${preview.lootRolls}\u00D7 loot` : ""}${preview.rarityShift ? ` · +${preview.rarityShift} rarity` : ""}${preview.bonusTreaties ? ` · +${preview.bonusTreaties}\uD83C\uDF80 guaranteed` : ""}`
     : "—";
 
   body.innerHTML = `
@@ -2152,19 +2152,17 @@ function openOfflineModal(summary) {
     } else if (r.netPenalty > 0) {
       hazardTxt = ` <span class="muted">— hazards +${r.netPenalty} DC</span>`;
     }
-    return `<li>${escapeHtml(r.catNames.join(", "))} @ ${hood.icon} T${r.tier} ${hood.name} — ${r.outcome} (+${r.gold}💰${fishTxt}${treatyTxt}${lootTxt})${hazardTxt}</li>`;
+    return `<li>${escapeHtml(r.catNames.join(", "))} @ ${hood.icon} T${r.tier} ${hood.name} — ${r.outcome} (+${formatNumber(r.gold)}💰${fishTxt}${treatyTxt}${lootTxt})${hazardTxt}</li>`;
   }).join("");
   body.innerHTML = `
     <h3>While you were gone (${formatDuration(summary.elapsed)})\u2026</h3>
-    <p>${summary.resolved.length} missions finished. +${totalGold}💰${totalFish ? `, +${totalFish}🐟` : ""}${totalTreaty ? `, +${totalTreaty}🎀` : ""}, ${totalLoot} item(s).</p>
+    <p>${summary.resolved.length} missions finished. +${formatNumber(totalGold)}💰${totalFish ? `, +${formatNumber(totalFish)}🐟` : ""}${totalTreaty ? `, +${totalTreaty}🎀` : ""}, ${totalLoot} item(s).</p>
     <ul class="offline-list">${list}</ul>
     <div class="modal-actions"><button class="btn-primary" data-modal-close>Nice!</button></div>`;
   $("#modal").classList.add("open");
-
-  // Queue stray offers from offline catchup.
-  for (const r of summary.resolved) {
-    if (r.strayOffer) uiState.strayQueue.push(r.strayOffer);
-  }
+  // v0.4.2: stray queueing for offline-resolved missions happens in main.js boot() via
+  // queueStrays(summary.resolved). Removed duplicate loop here that caused every stray
+  // offer to be queued twice and appear back-to-back after dismissing this modal.
 }
 
 // --- Golden Mouse modal -------------------------------------------------
@@ -2312,6 +2310,9 @@ function presentQueuedFlashes() {
       showFlashToast("\uD83D\uDCDA", "Research complete", ev.name, "toast-research");
     } else if (ev.type === "napNudge") {
       showFlashToast("\u{1F4A4}", "Cat Nap ready", `+${ev.preview}\uD83C\uDF00 waiting \u2014 check Eternal Perks.`, "toast-nap");
+    } else if (ev.type === "achievement") {
+      // v0.4.2: surface achievements with their reward note so silent drops (e.g. +10🌀) land.
+      showFlashToast("\uD83C\uDFC6", `Achievement: ${ev.name}`, ev.note || null, "toast-achievement");
     }
   }
   gameState._flashQueue = [];
@@ -2322,8 +2323,8 @@ function showMissionToast(r) {
   if (!host) return;
   const hood = NEIGHBORHOODS[r.neighborhoodId];
   const outcomeIcon = r.outcome === "crit" ? "\u2B50" : r.outcome === "success" ? "\u2705" : "\u26A0\uFE0F";
-  const parts = [`+${r.gold}\uD83D\uDCB0`];
-  if (r.fishes)   parts.push(`+${r.fishes}\uD83D\uDC1F`);
+  const parts = [`+${formatNumber(r.gold)}\uD83D\uDCB0`];
+  if (r.fishes)   parts.push(`+${formatNumber(r.fishes)}\uD83D\uDC1F`);
   if (r.treaties) parts.push(`+${r.treaties}\uD83C\uDF80`);
   if (r.items.length) parts.push(`+${r.items.length} loot`);
   const hazardLine = (r.outcome === "fail" && r.topUnmitigated)
@@ -2349,6 +2350,13 @@ function showMissionToast(r) {
 }
 
 function closeModal() {
+  // v0.4.2: if the welcome modal was open (any dismissal path incl. Escape), mark the
+  // tutorial as seen so returning players don't see it on every reload. Detection: the
+  // welcome modal is the only one that renders a "#welcome-dismiss" button.
+  if ($("#welcome-dismiss") && !gameState?.tutorialSeen) {
+    gameState.tutorialSeen = true;
+    requestSave();
+  }
   $("#modal").classList.remove("open");
   $("#modal-body").innerHTML = "";
   uiState.picker = null;

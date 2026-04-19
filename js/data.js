@@ -2,6 +2,11 @@
 // data.js — Static definitions for Cat Adventure Club
 // =============================================================
 
+// Single source of truth for the version string shown in-game. The `?v=` cache-busters
+// in index.html must be bumped to match when releasing. Displayed version is stamped
+// into the DOM at boot by main.js to avoid drift.
+const BUILD_VERSION = "0.4.2";
+
 const SAVE_KEY = "catgame.v3";
 const SAVE_VERSION = 3;
 const MAX_OFFLINE_MS = 24 * 60 * 60 * 1000;
@@ -239,11 +244,15 @@ const MISSION_TIERS = [
   // Tiers 6-10 are system-gated on top of the gold threshold — Club Level / Achievement / Prestige.
   { tier: 6, effectsActive: 4, duration: 3 * 60 * 60 * 1000,difficulty:  54, goldRange: [ 500,  1200], fishRange: [ 5,  8], treatyChance: 0.28, xpReward:  900, lootChance: 0.85, rarityWeights: { common: 25, rare: 40, epic: 27, legendary: 8 },
     requiresClubLevel: 4 },
+  // v0.4.2: T7 gate swapped with T8 so T7 unlocks with P1 (was blocked behind Pack Leader +
+  // party3 perk, which required P1 first — meaning T8 always unlocked before T7).
   { tier: 7, effectsActive: 4, duration: 6 * 60 * 60 * 1000,difficulty:  58, goldRange: [1100,  2500], fishRange: [ 8, 12], treatyChance: 0.42, xpReward: 1800, lootChance: 0.90, rarityWeights: { common: 15, rare: 38, epic: 34, legendary: 13 },
-    requiresAchievement: "packLeader" },
-  { tier: 8, effectsActive: 5, duration: 12* 60 * 60 * 1000,difficulty:  62, goldRange: [2400,  5500], fishRange: [12, 18], treatyChance: 0.60, xpReward: 3600, lootChance: 0.95, rarityWeights: { common: 10, rare: 32, epic: 38, legendary: 20 },
     requiresPrestige: 1 },
-  { tier: 9, effectsActive: 5, duration: 24* 60 * 60 * 1000,difficulty:  72, goldRange: [5500, 12000], fishRange: [18, 28], treatyChance: 0.80, xpReward: 7000, lootChance: 0.97, rarityWeights: { common:  5, rare: 25, epic: 40, legendary: 30 },
+  // v0.4.2: T8 duration 12h → 8h (respects the "one per work day" idle-game rhythm).
+  { tier: 8, effectsActive: 5, duration:  8* 60 * 60 * 1000,difficulty:  62, goldRange: [2400,  5500], fishRange: [12, 18], treatyChance: 0.60, xpReward: 3600, lootChance: 0.95, rarityWeights: { common: 10, rare: 32, epic: 38, legendary: 20 },
+    requiresPrestige: 1, requiresAchievement: "packLeader" },
+  // v0.4.2: T9 duration 24h → 16h (respects daily cycle without removing the "sleep it" feel).
+  { tier: 9, effectsActive: 5, duration: 16* 60 * 60 * 1000,difficulty:  72, goldRange: [5500, 12000], fishRange: [18, 28], treatyChance: 0.80, xpReward: 7000, lootChance: 0.97, rarityWeights: { common:  5, rare: 25, epic: 40, legendary: 30 },
     requiresPrestige: 2 },
   { tier:10, effectsActive: 5, duration: 48* 60 * 60 * 1000,difficulty:  82, goldRange:[12000, 28000], fishRange: [30, 45], treatyChance: 0.95, xpReward:14000, lootChance: 0.99, rarityWeights: { common:  2, rare: 15, epic: 40, legendary: 43 },
     requiresPrestige: 3, requiresClubLevel: 7 }
@@ -384,7 +393,9 @@ const ETERNAL_PERKS = [
     desc: "Keep one extra cat during Cat Nap. Stacks \u00D7 3 (max 4 kept per nap).",
     repeatable: true, maxLevel: 3,
     level: s => s.eternalPerks.cherished || 0,
-    cost:  s => 5 + 2 * (s.eternalPerks.cherished || 0),
+    // v0.4.2: reduced from 5+2·lvl to 3+lvl so post-P1 runs don't re-grind from 1 cat.
+    // Costs now: 3/4/5/6 for levels 1-3 (was 5/7/9/11).
+    cost:  s => 3 + (s.eternalPerks.cherished || 0),
     owned: s => (s.eternalPerks.cherished || 0) >= 3,
     available: s => (s.eternalPerks.cherished || 0) < 3,
     apply: s => { s.eternalPerks.cherished = (s.eternalPerks.cherished || 0) + 1; } }
