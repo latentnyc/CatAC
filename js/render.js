@@ -1064,7 +1064,7 @@ function renderFishing() {
       ${bar}
       <div class="fish-actions">${button}</div>
     </div>
-    <div class="fish-stats muted">Total caught: ${f.totalCaught || 0} \u00B7 Watch for a tug \u2014 HOOK! mid-cast for a richer catch.</div>
+    <div class="fish-stats muted">Total caught: ${f.totalCaught || 0}${fishingPrestigeBonus() > 0 ? ` \u00B7 +${fishingPrestigeBonus()}\uD83D\uDC1F/catch from prestige` : ""} \u00B7 Watch for a tug \u2014 HOOK! mid-cast for a richer catch.</div>
     <div class="fish-upgrades">${upgradeRows}</div>`;
 }
 

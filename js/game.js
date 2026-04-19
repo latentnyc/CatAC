@@ -1284,6 +1284,15 @@ function fishingBaitBonus() {
   return gameState?.fishing?.upgrades?.bait || 0;
 }
 
+// Prestige-based fishing scaling. Adds a flat +N fish per catch, where N is roughly half
+// the prestige count rounded. Chosen to keep early game untouched while giving veterans a
+// reason to feel prestige in the fish economy. Does NOT affect rarity-shift rolls — the
+// odds of big fish / treaties / relics remain the same. Treaty/relic catches (non-fish
+// reward kinds) also don't benefit; this is strictly a bonus on fish-kind rewards.
+function fishingPrestigeBonus() {
+  return Math.round((gameState?.prestigeCount || 0) * 0.5);
+}
+
 // One place to build a cast record. Fixes the prior bug where auto-caster re-casts
 // lacked a biteAt (so the HOOK! button never appeared on follow-up casts).
 function createFishingCast(startedAt) {
@@ -1368,7 +1377,7 @@ function resolveFishingCast(opts) {
   }
   let summary = reward.note;
   if (reward.kind === "fish") {
-    const amt = randInt(reward.min, reward.max) + fishingBaitBonus();
+    const amt = randInt(reward.min, reward.max) + fishingBaitBonus() + fishingPrestigeBonus();
     gameState.fishes = (gameState.fishes || 0) + amt;
     summary += ` +${amt}\uD83D\uDC1F`;
   } else if (reward.kind === "treaty") {
