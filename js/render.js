@@ -674,17 +674,23 @@ function renderInventory() {
   const toolbar = $("#inventory-toolbar");
   if (toolbar) renderInventoryToolbar(toolbar);
 
-  if (!gameState.inventory.length) {
-    host.innerHTML = `<div class="empty-state">No loot yet. Plan a mission!</div>`;
+  // Equipped items live on the cat cards — don't duplicate them here. This is the stash,
+  // strictly what's available to equip or sell.
+  const stash = gameState.inventory.filter(i => !isItemEquipped(i.id));
+
+  if (!stash.length) {
+    const msg = gameState.inventory.length
+      ? "All your gear is equipped. Unequip something from a cat card to see it here."
+      : "No loot yet. Plan a mission!";
+    host.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
   }
 
   const filter = uiState.inventoryFilter;
-  let items = gameState.inventory.slice();
+  let items = stash;
   if (filter !== "all") items = items.filter(i => i.rarity === filter);
 
-  // Sort. Unequipped always come before equipped within the same sort key so freshly-looted
-  // items surface at the top of each group.
+  // Sort — stash is all-unequipped so the primary key is whatever the player picked.
   const rarityRank = { legendary: 4, epic: 3, rare: 2, common: 1 };
   const slotRank   = { collar: 0, toy: 1, treat: 2, relic: 3 };
   const sortMode = uiState.inventorySort || "rarity";
@@ -695,9 +701,6 @@ function renderInventory() {
     return sb - sa;
   };
   items.sort((a, b) => {
-    const ea = isItemEquipped(a.id) ? 1 : 0;
-    const eb = isItemEquipped(b.id) ? 1 : 0;
-    if (ea !== eb) return ea - eb;
     if (sortMode === "rarity") {
       const ra = rarityRank[b.rarity] - rarityRank[a.rarity];
       if (ra !== 0) return ra;
@@ -725,30 +728,30 @@ function renderInventory() {
   });
 
   if (!items.length) {
-    host.innerHTML = `<div class="empty-state">No ${filter} items.</div>`;
+    host.innerHTML = `<div class="empty-state">No unequipped ${filter} items.</div>`;
     return;
   }
 
   host.innerHTML = items.map(item => {
-    const equipped = isItemEquipped(item.id);
     const hood = NEIGHBORHOODS[item.affinity];
     return `
-      <div class="inv-item rarity-${item.rarity}${equipped ? " equipped" : ""}" data-item-id="${item.id}"
+      <div class="inv-item rarity-${item.rarity}" data-item-id="${item.id}"
            title="${escapeHtml(describeItemFull(item))}">
         <div class="inv-type">${item.type} · ${hood?.icon || ""}</div>
         <div class="inv-name">${escapeHtml(item.name)}</div>
         <div class="inv-bonus">${describeBonus(item.bonus)}</div>
-        ${equipped ? '<div class="inv-flag">Equipped</div>' : ""}
       </div>`;
   }).join("");
 }
 
 function renderInventoryToolbar(host) {
+  // Counts reflect the stash (unequipped only) — equipped gear is shown on cat cards.
+  const stash = gameState.inventory.filter(i => !isItemEquipped(i.id));
   const filters = ["all", "common", "rare", "epic", "legendary"];
   const pills = filters.map(f => {
     const count = f === "all"
-      ? gameState.inventory.length
-      : gameState.inventory.filter(i => i.rarity === f).length;
+      ? stash.length
+      : stash.filter(i => i.rarity === f).length;
     const active = uiState.inventoryFilter === f ? "active" : "";
     const labelTxt = f === "all" ? "All" : f[0].toUpperCase() + f.slice(1);
     return `<button class="inv-filter-pill ${active} rarity-${f}" data-inv-filter="${f}">${labelTxt} <span class="inv-filter-count">${count}</span></button>`;
