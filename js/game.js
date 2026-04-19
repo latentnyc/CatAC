@@ -1811,6 +1811,18 @@ function resolveMission(active) {
     } else if (active.searchForStrays) {
       const strayChance = STRAY_BASE_CHANCE + (mission.tier - 1) * STRAY_TIER_BONUS + (active.strayBonusChance || 0) + bestiaryStrayBonus() + eternalStrayPct() + patronStrayPct();
       if (Math.random() < strayChance) strayOffer = rollCat();
+      // If a buff was applied but no stray appeared, refund the buff back to pending so
+      // the purchase keeps working across future missions instead of vanishing silently.
+      // This matches player intuition: "I paid for +50% chance — it should eventually help."
+      if (active.strayBonusChance > 0) {
+        const pct = Math.round(active.strayBonusChance * 100);
+        if (strayOffer) {
+          logEvent(`\uD83C\uDFA3 Your +${pct}% stray boost paid off \u2014 ${strayOffer.name} appeared.`);
+        } else {
+          gameState.shop.pendingStrayBonus = (gameState.shop.pendingStrayBonus || 0) + active.strayBonusChance;
+          logEvent(`\uD83C\uDFA3 +${pct}% stray boost didn't find anyone this time \u2014 carries over to the next search.`);
+        }
+      }
     }
   }
 
