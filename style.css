@@ -129,22 +129,27 @@ h2 {
 
 #party-panel {
   display: grid;
-  grid-template-columns: 1fr;
+  /* Two cards side-by-side, then wrap vertically. minmax(0, 1fr) lets cards shrink into
+     their grid track so wide stats/equip rows don't trigger a horizontal scroll. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   /* Smaller max so the Inventory + Activity panels below fit in the same column without
      pushing the main-column content off-screen. Scroll within the party list as needed. */
   max-height: 45vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
 }
+/* Cat card + its internal grids: min-width 0 so they honor the parent's grid track.
+   Without this, CSS grid uses min-content as the minimum and cards overflow horizontally. */
+.cat-card, .stats-grid, .equip-row { min-width: 0; }
+.cat-card { overflow: hidden; }
 /* Section headings in the left column pick up a bit of breathing room so Inventory /
    Activity feel distinct from the Club list without needing their own <details> wrapper. */
 .column-party h2 + * { margin-top: 0; }
 .column-party > h2 { margin-top: 16px; }
 .column-party > h2:first-child { margin-top: 0; }
-@media (min-width: 1400px) {
-  #party-panel { grid-template-columns: 1fr 1fr; }
-}
+/* (no wide-viewport override needed — party-panel is always 2-column above mobile) */
 
 .cat-card {
   display: grid;
@@ -1199,6 +1204,8 @@ h3.rarity-legendary { color: var(--rarity-legendary); }
 
 @media (max-width: 520px) {
   #top-bar { grid-template-columns: 1fr; gap: 8px; text-align: center; }
+  /* Party cards fall back to 1 column at phone widths where 2 would squish too much. */
+  #party-panel { grid-template-columns: 1fr; }
   .top-actions { justify-self: center; }
   .brand { justify-content: center; flex-wrap: wrap; }
   .brand-version { font-size: 9px; }
