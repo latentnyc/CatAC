@@ -144,8 +144,9 @@ function partyPassives(catIds) {
     totals[p.kind] = (totals[p.kind] || 0) + p.amount;
     // Talent passive-amp: any "passiveKind" talent the cat has picked adds to the same kind,
     // letting specced cats scale their class identity (Bulwark II, Insight II, etc.).
+    // Trees hold slots (plain nodes or {choice:[a,b]}), so flatten before scanning.
     const tree = talentTreeFor(cat);
-    for (const node of tree) {
+    for (const node of tree.flatMap(talentSlotNodes)) {
       if (!cat.talents?.[node.id] || !node.passiveKind) continue;
       totals[node.passiveKind.kind] = (totals[node.passiveKind.kind] || 0) + node.passiveKind.amount;
     }
@@ -184,11 +185,30 @@ function partySynergyTotals(catIds) {
 
 // Roll a Golden Mouse chance on mission resolve; if it lands, queue an event the UI can
 // pick up and present as a modal. Very low chance (3%), only on non-fail outcomes.
-function maybeQueueGoldenMouse(outcome) {
+function maybeQueueGoldenMouse(outcome, neighborhoodId) {
   if (outcome === "fail") return;
-  if (Math.random() >= GOLDEN_MOUSE_CHANCE) return;
+  // The Dreaming's hood perk doubles mouse chance there (mouseMul).
+  const mul = (neighborhoodId && NEIGHBORHOODS[neighborhoodId]?.perk?.mouseMul) || 1;
+  if (Math.random() >= GOLDEN_MOUSE_CHANCE * mul) return;
   gameState.goldenMouseQueue = gameState.goldenMouseQueue || [];
   gameState.goldenMouseQueue.push({ id: uid(), at: Date.now() });
+  gameState.achievementFlags = gameState.achievementFlags || {};
+  gameState.achievementFlags.mouseSeen = true;
+  gameState.stats = gameState.stats || {};
+  gameState.stats.mousesSeen = (gameState.stats.mousesSeen || 0) + 1;
+}
+
+// Ambient Golden Mouse: a mouse wanders by on a wall-clock schedule, independent of missions, so
+// checking in between long timers is rewarded (Cookie-Clicker golden-cookie cadence). Only ticks
+// during live play; offline flood is separately capped in catchUpOffline.
+function ambientMouseDelayMs() { return (15 + Math.random() * 15) * 60 * 1000; } // ~15-30 min real time
+function maybeAmbientGoldenMouse(now) {
+  if (!gameState.nextAmbientMouseAt) { gameState.nextAmbientMouseAt = now + ambientMouseDelayMs(); return; }
+  if (now < gameState.nextAmbientMouseAt) return;
+  gameState.nextAmbientMouseAt = now + ambientMouseDelayMs();
+  gameState.goldenMouseQueue = gameState.goldenMouseQueue || [];
+  if (gameState.goldenMouseQueue.length >= 2) return; // don't pile up while the player ignores them
+  gameState.goldenMouseQueue.push({ id: uid(), at: now, ambient: true });
   gameState.achievementFlags = gameState.achievementFlags || {};
   gameState.achievementFlags.mouseSeen = true;
   gameState.stats = gameState.stats || {};
@@ -546,6 +566,7 @@ function partyBonuses(catIds) {
   const b = challengeBoonTotals();
   const m = masteryPartyTotals(catIds);
   const t = partyTalentTotals(catIds);
+  const u = partyUniqueTotals(catIds);
   // Gear sets contribute a global loot % (4-piece). Mitigation is hood-specific and applied
   // in partyMitigation(), not here.
   let setLootPct = 0;
@@ -558,14 +579,15 @@ function partyBonuses(catIds) {
   // Bonded pairs contribute a small loot-chance bump each.
   const bondLoot = bondedPairsInParty(catIds) * BOND_LOOT_PCT_BONUS;
   return {
-    mit:         (p.mit || 0)         + (s.mit || 0)         + (b.mit || 0)         + (t.mit || 0),
-    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + setLootPct + bondLoot + bestiaryGlobalLootPct() + eternalLootPct() + researchLootPct(),
-    speedPct:    Math.min(0.5, (p.speedPct || 0) + (s.speedPct || 0) + (t.speedPct || 0)),
-    floorPct:    (p.floorPct || 0)    + (s.floorPct || 0),
-    xpPct:       (p.xpPct || 0)       + (s.xpPct || 0)       + (b.xpPct || 0)       + (t.xpPct || 0),
-    rarityShift: (p.rarityShift || 0) + (s.rarityShift || 0) + (t.rarityShift || 0) + researchRarityShift(),
-    goldPct:     (s.goldPct || 0)                             + (t.goldPct || 0),
-    scoreBonus:  (s.scoreBonus || 0)  + (b.scoreBonus || 0)  + (t.scoreBonus || 0)
+    mit:         (p.mit || 0)         + (s.mit || 0)         + (b.mit || 0)         + (t.mit || 0)      + (u.mit || 0),
+    lootPct:     (p.lootPct || 0)     + (s.lootPct || 0)     + (b.lootPct || 0)     + (m.lootPct || 0)  + (t.lootPct || 0) + (u.lootPct || 0) + setLootPct + bondLoot + bestiaryGlobalLootPct() + eternalLootPct() + researchLootPct(),
+    speedPct:    Math.min(0.5, (p.speedPct || 0) + (s.speedPct || 0) + (t.speedPct || 0) + (u.speedPct || 0)),
+    floorPct:    (p.floorPct || 0)    + (s.floorPct || 0)       + (t.floorPct || 0)     + (u.floorPct || 0),
+    xpPct:       (p.xpPct || 0)       + (s.xpPct || 0)       + (b.xpPct || 0)       + (t.xpPct || 0)    + (u.xpPct || 0),
+    rarityShift: (p.rarityShift || 0) + (s.rarityShift || 0) + (t.rarityShift || 0) + (u.rarityShift || 0) + researchRarityShift(),
+    goldPct:     (s.goldPct || 0)                             + (t.goldPct || 0)    + (u.goldPct || 0),
+    scoreBonus:  (s.scoreBonus || 0)  + (b.scoreBonus || 0)  + (t.scoreBonus || 0)  + (u.scoreBonus || 0),
+    fishPct:     (s.fishPct || 0)                                                   + (u.fishPct || 0)
   };
 }
 
@@ -597,6 +619,29 @@ function partyMitigation(catIds, neighborhoodId) {
   return total;
 }
 
+// v0.5.0 hood identity perk accessor — each neighborhood's mechanical signature.
+function hoodPerk(neighborhoodId) {
+  return NEIGHBORHOODS[neighborhoodId]?.perk || {};
+}
+
+// Unique gear effects across the party — looked up from the UNIQUE_ITEMS catalog by the
+// equipped item's uniqueId (numbers live in data.js so rebalances hit existing saves).
+function partyUniqueTotals(catIds) {
+  const totals = { mit: 0, lootPct: 0, xpPct: 0, goldPct: 0, scoreBonus: 0, rarityShift: 0, fishPct: 0, speedPct: 0, floorPct: 0 };
+  for (const catId of catIds) {
+    const cat = findCat(catId);
+    if (!cat) continue;
+    for (const slot of ITEM_SLOTS) {
+      const item = findItem(cat.equipped[slot]);
+      if (!item || !item.uniqueId) continue;
+      const def = UNIQUE_ITEMS.find(u => u.id === item.uniqueId);
+      if (!def || !def.effect) continue;
+      for (const [k, v] of Object.entries(def.effect)) totals[k] = (totals[k] || 0) + v;
+    }
+  }
+  return totals;
+}
+
 // Active effects at this mission's tier (first N from the neighborhood's list).
 function activeEffects(mission) {
   const hood = NEIGHBORHOODS[mission.neighborhoodId];
@@ -611,7 +656,11 @@ function missionEffectsSummary(catIds, mission, extraMit) {
   const effects = activeEffects(mission);
   const totalSeverity = effects.reduce((s, e) => s + e.severity, 0);
   const mitigation = partyMitigation(catIds, mission.neighborhoodId) + (extraMit || 0);
-  let pool = mitigation;
+  // Cap how much severity mitigation can erase so late-game gear can't collapse a mission back to
+  // its base difficulty — hazards always keep a bite. Surplus mitigation beyond the cap is idle.
+  const mitCap = Math.floor(totalSeverity * HAZARD_MAX_MITIGATED_FRAC);
+  const mitApplied = Math.min(mitigation, mitCap);
+  let pool = mitApplied;
   // Spend pool against highest-severity effects first so matching gear always "hurts the biggest".
   const sorted = [...effects].sort((a, b) => b.severity - a.severity);
   const remainingBySorted = sorted.map(e => {
@@ -629,6 +678,8 @@ function missionEffectsSummary(catIds, mission, extraMit) {
     effects: remaining,
     totalSeverity,
     mitigation,
+    mitApplied,
+    mitCap,
     netPenalty,
     effectiveDC: mission.difficulty + netPenalty
   };
@@ -673,7 +724,10 @@ function buildDailyMission(daily) {
     lootRolls:     mod.lootRolls || 1,
     rarityShift:   mod.rarityShift || 0,
     rarityWeights: { ...base.rarityWeights },
-    primaryChecks: [...hood.primaryChecks]
+    primaryChecks: [...hood.primaryChecks],
+    // Twist-daily rule changes (Solo Trial / Full House).
+    partyCap:          mod.partyCap || null,
+    requiresFullParty: !!mod.requiresFullParty
   };
 }
 
@@ -917,8 +971,10 @@ function partyScore(catIds, mission) {
   for (const stat of mission.primaryChecks) {
     const values = cats.map(c => effectiveStats(c)[stat]).sort((a, b) => b - a);
     let check = values[0];
-    for (let i = 1; i < values.length; i++) check += 0.25 * values[i];
-    if (star && star.stat === stat) check += STAR_CHECK_BONUS;
+    for (let i = 1; i < values.length; i++) check += PARTY_SUPPORT_COEFF * values[i];
+    // Star sign: flat +3 was noise against ~100-point endgame DCs, so the bonus scales with
+    // the check itself — max(flat, 10%) keeps it a real lever at every tier.
+    if (star && star.stat === stat) check += Math.max(STAR_CHECK_BONUS, Math.round(0.10 * check));
     total += check;
   }
   total += partyBonuses(catIds).scoreBonus;
@@ -1182,8 +1238,11 @@ function refreshStarSign() {
   if (!gameState) return;
   if (!isStargazingUnlocked()) return; // no sign rolls before the Rooftops teach you
   // If a cat holds the perch AND a sign already exists, they keep it — no auto-rotate.
-  // If no sign is set yet, fall through so the initial roll happens (the cat can then pick).
-  if (gameState.stargazing?.assignedCatId && gameState.stargazing.signId) return;
+  // EXCEPTION: special signs (Comet/Milk Moon) always pass on the day boundary, even with a
+  // perch cat — otherwise assigning a cat on a Comet day would pin +2 rarity shift forever.
+  const heldSign = STAR_SIGNS.find(s => s.id === gameState.stargazing?.signId);
+  const dayStale = gameState.stargazing?.dayKey !== utcDayKey();
+  if (gameState.stargazing?.assignedCatId && gameState.stargazing.signId && !(heldSign?.special && dayStale)) return;
   const today = utcDayKey();
   if (gameState.stargazing && gameState.stargazing.dayKey === today && gameState.stargazing.signId) return;
   const digits = today.replace(/-/g, "");
@@ -1200,10 +1259,13 @@ function setStarSign(signId) {
   if (!gameState.stargazing?.assignedCatId) return { ok: false, reason: "Assign a cat to the Stargazing perch to pick signs freely." };
   const sign = STAR_SIGNS.find(s => s.id === signId);
   if (!sign) return { ok: false, reason: "Unknown sign." };
+  // Special signs (Comet, Milk Moon) only appear in the daily rotation \u2014 pinning one via the
+  // perch would make its day-wide run effect permanent.
+  if (sign.special) return { ok: false, reason: `${sign.name} cannot be held \u2014 it passes when it passes.` };
   gameState.stargazing.signId = sign.id;
   gameState.stargazing.dayKey = utcDayKey();
   const cat = findCat(gameState.stargazing.assignedCatId);
-  logEvent(`${cat ? cat.name : "Someone"} points to ${sign.name} \u2014 +${STAR_CHECK_BONUS} ${STAT_LABELS[sign.stat]} on all checks.`);
+  logEvent(`${cat ? cat.name : "Someone"} points to ${sign.name} \u2014 ${starSignEffectText(sign)}.`);
   requestSave();
   return { ok: true };
 }
@@ -1258,7 +1320,9 @@ function rerollStarSign() {
   if (!canAfford(STAR_REROLL_COST)) return { ok: false, reason: "Not enough \uD83C\uDF80." };
   payCost(STAR_REROLL_COST);
   const cur = currentStarSign();
-  const others = STAR_SIGNS.filter(s => !cur || s.id !== cur.id);
+  // Specials are excluded from the paid reroll pool — they arrive only via the daily rotation,
+  // so a 2🎀 Shift can't buy a day of +2 rarity shift on demand.
+  const others = STAR_SIGNS.filter(s => !s.special && (!cur || s.id !== cur.id));
   const next = choice(others);
   gameState.stargazing.signId = next.id;
   logEvent(`Stars shift: ${next.name} rises. ${next.flavor}`);
@@ -1550,6 +1614,10 @@ function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearchOrOpts, ma
     return { ok: false, reason: `Requires a full party of ${partyMax()}.` };
   }
   if (catIds.length > partyMax()) return { ok: false, reason: `Max party size is ${partyMax()}.` };
+  // Twist dailies (e.g. Solo Trial) can cap the party below the normal max.
+  if (mission.partyCap && catIds.length > mission.partyCap) {
+    return { ok: false, reason: `This mission allows at most ${mission.partyCap} cat${mission.partyCap > 1 ? "s" : ""}.` };
+  }
 
   const cats = catIds.map(findCat);
   if (cats.some(c => !c)) return { ok: false, reason: "Missing cat." };
@@ -1585,7 +1653,8 @@ function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearchOrOpts, ma
   }
   // Research "Efficient Logistics" multiplies duration (after its floor clamp).
   const durationMul = Math.max(0.35, (1 - dexBonus) * (1 - speedPct) * abilityDurationMul) * researchDurationMul();
-  const duration = Math.floor(mission.duration * durationMul);
+  // Hood identity perk (e.g. Rooftops −8%) applies outside the 35% floor like research does.
+  const duration = Math.floor(mission.duration * durationMul * (hoodPerk(neighborhoodId).durationMul || 1));
 
   // Lock in stray consumables at mission start — but only if actually searching,
   // so players don't waste buffs on no-stray runs when the club is full.
@@ -1615,7 +1684,9 @@ function startMission(catIds, missionOrNbId, tierOrSearch, maybeSearchOrOpts, ma
     neighborhoodId,
     tier,
     catIds: [...catIds],
-    startedAt: Date.now(),
+    // opts.startedAt lets the offline catch-up anchor a re-fired mission at the previous
+    // mission's finish time so auto-repeat chains cleanly across a long gap. Live starts omit it.
+    startedAt: opts.startedAt || Date.now(),
     durationMs: duration,
     searchForStrays: !!searchForStrays,
     straySummoned: lockedSummons > 0,
@@ -1696,15 +1767,20 @@ function resolveMission(active) {
   // trades shop bargains for halved event rewards). Applied only to currencies, not XP/loot.
   const bossDailyMul = (mission.isDaily || mission.isBoss) ? patronBossDailyCurrencyMul() : 1.0;
 
+  // v0.5.0: hood identity perk + special star signs (Comet/Milk Moon) feed the reward stack.
+  const perk = hoodPerk(active.neighborhoodId);
+  const star = currentStarSign();
+  const starXpMul = star?.special?.xpMul || 1.0;
+
   const rawGold = randInt(mission.goldRange[0], mission.goldRange[1]);
-  const gold = Math.max(1, Math.floor(rawGold * goldMul * chaBonus * partySizeBonus * goldSynergyMul * bestiaryGlobalGoldMul() * eternalGoldMul() * patronGoldMul() * researchGoldMul() * bossDailyMul));
-  const xpPerCat = Math.max(1, Math.floor(mission.xpReward * xpMul * (1 + bonuses.xpPct) * eternalXpMul() * patronXpMul() * researchXpMul() * abilityFx.xpMul));
+  const gold = Math.max(1, Math.floor(rawGold * goldMul * chaBonus * partySizeBonus * goldSynergyMul * bestiaryGlobalGoldMul() * eternalGoldMul() * eternalNinthMul() * patronGoldMul() * researchGoldMul() * bossDailyMul * (perk.goldMul || 1)));
+  const xpPerCat = Math.max(1, Math.floor(mission.xpReward * xpMul * (1 + bonuses.xpPct) * eternalXpMul() * eternalNinthMul() * patronXpMul() * researchXpMul() * abilityFx.xpMul * (perk.xpMul || 1) * starXpMul));
 
   // Fishes: small count per mission, scaled by outcome and party size. Ranger Pathfinder
   // talent bumps the multiplier for its party. Daily/Boss patron penalty applies here too.
   const talentTotals = partyTalentTotals(active.catIds);
   const rawFish = randInt(mission.fishRange[0], mission.fishRange[1]);
-  const fishes = Math.max(0, Math.floor(rawFish * goldMul * partySizeBonus * (1 + (talentTotals.fishPct || 0)) * bossDailyMul));
+  const fishes = Math.max(0, Math.floor(rawFish * goldMul * partySizeBonus * (1 + (talentTotals.fishPct || 0) + (bonuses.fishPct || 0)) * bossDailyMul * (perk.fishMul || 1)));
 
   // Treaties: rare drop, only meaningful at higher tiers. Plus any daily/boss guaranteed bonus.
   // Night Market patron halves daily/boss treaty rewards (the big guarantees, mostly).
@@ -1721,11 +1797,17 @@ function resolveMission(active) {
   const bestWis = Math.max(...cats.map(c => effectiveStats(c).wis));
   const lootBonusMul = (1 + bonuses.lootPct) * (abilityFx.lootMul || 1.0);
   const lootRolls = Math.max(1, mission.lootRolls || 1);
-  const combinedRarityShift = (bonuses.rarityShift || 0) + (mission.rarityShift || 0) + (active.rarityShiftBonus || 0) + (abilityFx.rarityShift || 0);
+  const combinedRarityShift = (bonuses.rarityShift || 0) + (mission.rarityShift || 0) + (active.rarityShiftBonus || 0) + (abilityFx.rarityShift || 0) + (perk.rarityShift || 0) + (star?.special?.rarityShift || 0);
   for (let i = 0; i < cats.length; i++) {
     for (let r = 0; r < lootRolls; r++) {
       if (Math.random() < mission.lootChance * lootMul * lootBonusMul) {
-        const item = rollLoot(mission, { wis: bestWis, int: effectiveStats(cats[i]).int, rarityShift: combinedRarityShift });
+        let item = rollLoot(mission, { wis: bestWis, int: effectiveStats(cats[i]).int, rarityShift: combinedRarityShift });
+        // uniqueOwned() only sees the inventory — items minted earlier in THIS resolve are
+        // still local, so a double-legendary roll could mint the same unique twice. Downgrade
+        // an in-flight duplicate to a plain legendary.
+        if (item?.uniqueId && items.some(x => x.uniqueId === item.uniqueId)) {
+          item = generateItem("legendary", { wis: bestWis, int: effectiveStats(cats[i]).int, rarityShift: combinedRarityShift });
+        }
         if (item) {
           items.push(item);
           if (item.rarity === "legendary") {
@@ -1767,6 +1849,9 @@ function resolveMission(active) {
   // Every dropped item also counts toward the bestiary's item-template set regardless of auto-sell.
   for (const item of items) {
     recordItemFound(item);
+    if (item.uniqueId) {
+      logEvent(`\u{1F31F} UNIQUE FIND: ${item.name} — ${UNIQUE_ITEMS.find(u => u.id === item.uniqueId)?.flavor || ""}`);
+    }
     if (gameState.shop?.autoSellCommons && item.rarity === "common") {
       const v = 10;
       gameState.gold += v;
@@ -1817,7 +1902,7 @@ function resolveMission(active) {
   const masteryMul = outcome === "crit" ? 1.5 : outcome === "success" ? 1.0 : 0.5;
   grantSlotMastery(active.catIds, masteryMul);
   recordChallengeProgress(active, mission, outcome);
-  maybeQueueGoldenMouse(outcome);
+  maybeQueueGoldenMouse(outcome, active.neighborhoodId);
 
   // Lifetime stats — feeds the Stats Dashboard + the achievements v2 set.
   gameState.stats = gameState.stats || { missionsRun: 0, missionsCrit: 0, missionsFail: 0, legendariesFound: 0, mousesSeen: 0, consumablesBought: 0, firstStartedAt: Date.now() };
@@ -1835,7 +1920,7 @@ function resolveMission(active) {
     if (active.straySummoned) {
       strayOffer = rollCat();
     } else if (active.searchForStrays) {
-      const strayChance = STRAY_BASE_CHANCE + (mission.tier - 1) * STRAY_TIER_BONUS + (active.strayBonusChance || 0) + bestiaryStrayBonus() + eternalStrayPct() + patronStrayPct();
+      const strayChance = STRAY_BASE_CHANCE + (mission.tier - 1) * STRAY_TIER_BONUS + (active.strayBonusChance || 0) + bestiaryStrayBonus() + eternalStrayPct() + patronStrayPct() + (perk.strayPct || 0);
       if (Math.random() < strayChance) strayOffer = rollCat();
       // If a buff was applied but no stray appeared, refund the buff back to pending so
       // the purchase keeps working across future missions instead of vanishing silently.
@@ -1884,7 +1969,11 @@ function resolveMission(active) {
       return c && c.status === "idle";
     });
     if (stillIdle && isTierUnlocked(active.tier)) {
-      startMission(active.catIds, active.neighborhoodId, active.tier, active.searchForStrays, { autoRepeat: true });
+      // Anchor the re-fire at this mission's finish time so offline auto-repeat chains cleanly
+      // (a 60s mission over an 8h gap resolves ~480x, not once). Live play sees finishedAt ≈ now.
+      const finishedAt = active.startedAt + active.durationMs;
+      startMission(active.catIds, active.neighborhoodId, active.tier, active.searchForStrays,
+        { autoRepeat: true, startedAt: finishedAt });
     }
   }
 
@@ -1911,6 +2000,17 @@ function resolveMission(active) {
   };
 }
 
+// One copy at a time: a unique can re-drop only after the owned copy is lost (e.g. left on a
+// retired cat at prestige). Equipped gear stays in gameState.inventory, so one check covers both.
+function uniqueOwned(uniqueId) {
+  return gameState.inventory.some(i => i.uniqueId === uniqueId);
+}
+
+function makeUniqueItem(def) {
+  return { id: uid(), type: def.type, rarity: "legendary", name: def.name,
+    bonus: { ...def.bonus }, affinity: def.hood, uniqueId: def.id };
+}
+
 function rollLoot(mission, stats) {
   const weights = { ...mission.rarityWeights };
   const wisShift = Math.max(0, (stats.wis || 0) - 5);
@@ -1927,6 +2027,14 @@ function rollLoot(mission, stats) {
   for (const r of RARITY_ORDER) {
     roll -= weights[r] || 0;
     if (roll <= 0) { rarity = r; break; }
+  }
+  // v0.5.0: a legendary landing in a unique's home hood has a chance to BE that unique —
+  // the neighborhood's chase item. Never drops while a copy is owned.
+  if (rarity === "legendary") {
+    const def = UNIQUE_ITEMS.find(u => u.hood === mission.neighborhoodId);
+    if (def && !uniqueOwned(def.id) && Math.random() < UNIQUE_DROP_CHANCE) {
+      return makeUniqueItem(def);
+    }
   }
   return generateItem(rarity, stats);
 }
@@ -2000,32 +2108,40 @@ function talentTreeFor(cat) {
   return TALENT_TREES[cat.breed] || [];
 }
 
-// Index of the next pickable node (the first unpicked node in linear order). -1 if maxed.
+// Index of the next pickable SLOT (the first slot with no picked node). -1 if maxed.
+// A choice slot counts as picked once EITHER branch is taken (the other locks out).
 function nextTalentIdx(cat) {
   const tree = talentTreeFor(cat);
   for (let i = 0; i < tree.length; i++) {
-    if (!cat.talents?.[tree[i].id]) return i;
+    if (!talentSlotPicked(cat, tree[i])) return i;
   }
   return -1;
 }
 
-// Pick a talent. Enforces linear order and available points; applies stat talents instantly.
+// Pick a talent. Enforces slot order and available points; applies stat talents instantly.
+// For a choice slot, picking one branch permanently locks out the sibling.
 function pickTalent(catId, talentId) {
   const cat = findCat(catId);
   if (!cat) return { ok: false, reason: "No such cat." };
   if ((cat.pendingTalentPoints || 0) < 1) return { ok: false, reason: "No talent points to spend." };
   const tree = talentTreeFor(cat);
-  const idx = tree.findIndex(n => n.id === talentId);
+  const idx = tree.findIndex(slot => talentSlotNodes(slot).some(n => n.id === talentId));
   if (idx === -1) return { ok: false, reason: "Unknown talent." };
   if (cat.talents?.[talentId]) return { ok: false, reason: "Already picked." };
-  // Linear-tree guard: every earlier node must be picked first.
+  const slot = tree[idx];
+  const already = talentSlotPicked(cat, slot);
+  if (already) return { ok: false, reason: `${already.name} already claims this slot — the paths diverge.` };
+  // Slot-order guard: every earlier slot must have a pick first.
   for (let i = 0; i < idx; i++) {
-    if (!cat.talents[tree[i].id]) return { ok: false, reason: `Requires ${tree[i].name} first.` };
+    if (!talentSlotPicked(cat, tree[i])) {
+      const names = talentSlotNodes(tree[i]).map(n => n.name).join(" or ");
+      return { ok: false, reason: `Requires ${names} first.` };
+    }
   }
   cat.talents = cat.talents || {};
   cat.talents[talentId] = true;
   cat.pendingTalentPoints--;
-  const node = tree[idx];
+  const node = talentSlotNodes(slot).find(n => n.id === talentId);
   // Instant-stat talents mutate baseStats permanently (bypasses the 12 cap per game rules).
   if (node.stat) {
     cat.baseStats[node.stat.stat] = (cat.baseStats[node.stat.stat] || 0) + node.stat.amount;
@@ -2038,12 +2154,12 @@ function pickTalent(catId, talentId) {
 
 // Sum talent mission-bonus fields across a party for mission math.
 function partyTalentTotals(catIds) {
-  const totals = { mit: 0, lootPct: 0, speedPct: 0, xpPct: 0, scoreBonus: 0, rarityShift: 0, goldPct: 0, fishPct: 0, hazardReduction: 0, floorCapRaise: 0, apexPredator: false };
+  const totals = { mit: 0, lootPct: 0, speedPct: 0, xpPct: 0, scoreBonus: 0, rarityShift: 0, goldPct: 0, fishPct: 0, floorPct: 0, hazardReduction: 0, floorCapRaise: 0, apexPredator: false };
   for (const id of catIds) {
     const cat = findCat(id);
     if (!cat) continue;
     const tree = talentTreeFor(cat);
-    for (const node of tree) {
+    for (const node of tree.flatMap(talentSlotNodes)) {
       if (!cat.talents?.[node.id]) continue;
       if (!node.missionBonus) continue;
       const mb = node.missionBonus;
@@ -2091,7 +2207,10 @@ function equipBestForCat(catId) {
   const rarityRank = { legendary: 4, epic: 3, rare: 2, common: 1 };
   const score = item => {
     const sum = Object.values(item.bonus).reduce((s, v) => s + v, 0);
-    return sum * 10 + (rarityRank[item.rarity] || 0);
+    // Named uniques carry a catalog effect the stat-sum can't see (uniques total 9 stat points
+    // vs a generic legendary's 12) — without this, "Auto-gear all" would silently strip the
+    // game's chase items in favor of any plain legendary. Uniques always win their slot.
+    return sum * 10 + (rarityRank[item.rarity] || 0) + (item.uniqueId ? 1000 : 0);
   };
   let changed = 0;
   for (const slot of ITEM_SLOTS) {
@@ -2114,6 +2233,60 @@ function equipBestForCat(catId) {
     requestSave();
   }
   return { ok: true, changed };
+}
+
+// One-click "equip best on everyone" — loops the per-cat optimizer over every non-mission cat.
+// Order matters (earlier cats get first pick), so run the roster in current order: the player's
+// veterans sit at the top and deserve the best gear by default.
+function equipBestForAll() {
+  let totalChanged = 0, catsTouched = 0;
+  for (const cat of gameState.cats) {
+    if (cat.status === "mission") continue;
+    const r = equipBestForCat(cat.id);
+    if (r.ok && r.changed) { totalChanged += r.changed; catsTouched++; }
+  }
+  if (totalChanged) logEvent(`⚙️ Club-wide gear pass: ${totalChanged} slot${totalChanged > 1 ? "s" : ""} optimized across ${catsTouched} cat${catsTouched > 1 ? "s" : ""}.`);
+  else logEvent(`⚙️ Club-wide gear pass: everyone already has their best kit.`);
+  return { ok: true, totalChanged, catsTouched };
+}
+
+// v0.5.0 Cat Nap Pillow — advance every running timer by `ms`. We shift start/finish stamps
+// into the past and let the MAIN LOOP's next tick resolve whatever comes due, so toasts,
+// strays, and auto-repeat chaining all flow through the normal presentation path.
+const TIME_SKIP_MS = 2 * 60 * 60 * 1000;
+function applyTimeSkip(ms) {
+  for (const m of gameState.missions) m.startedAt -= ms;
+  if (gameState.fishing?.cast) {
+    gameState.fishing.cast.startedAt -= ms;
+    // biteAt is absolute — it must travel with startedAt or the HOOK! window desyncs.
+    if (gameState.fishing.cast.biteAt) gameState.fishing.cast.biteAt -= ms;
+  }
+  for (const plot of (gameState.garden?.plots || [])) {
+    if (plot) { plot.plantedAt -= ms; plot.finishedAt -= ms; }
+  }
+  if (gameState.research?.active) {
+    gameState.research.active.startedAt  -= ms;
+    gameState.research.active.completesAt -= ms;
+  }
+  // Lounge trickle counts the skipped time as elapsed; ambient mouse comes forward too.
+  if (gameState.lastLoungeTrickle) gameState.lastLoungeTrickle -= ms;
+  if (gameState.nextAmbientMouseAt) gameState.nextAmbientMouseAt -= ms;
+}
+
+function buyTimeSkip() {
+  const item = SHOP_ITEMS.find(i => i.id === "pillow");
+  if (!item) return { ok: false, reason: "Unknown item." };
+  const hasTimers = gameState.missions.length || gameState.fishing?.cast ||
+    (gameState.garden?.plots || []).some(Boolean) || gameState.research?.active;
+  if (!hasTimers) return { ok: false, reason: "Nothing is running — the nap would be wasted." };
+  if (!canAfford(item.cost)) return { ok: false, reason: insufficientMessage(item.cost) };
+  payCost(item.cost);
+  applyTimeSkip(TIME_SKIP_MS);
+  gameState.stats = gameState.stats || {};
+  gameState.stats.consumablesBought = (gameState.stats.consumablesBought || 0) + 1;
+  logEvent(`\u{1F4A4} The whole club naps. Every timer jumps ahead 2 hours.`);
+  saveStateNow();
+  return { ok: true };
 }
 
 function equipItem(catId, itemId) {
@@ -2401,7 +2574,10 @@ function cancelQueuedMission(id) {
 
 // Advance the queue: walk entries in order, starting any whose cats are ALL idle + whose
 // tier is still unlocked. Bails at the first blocked entry so order is preserved.
-function tickMissionQueue() {
+// `anchorTs` (optional) back-dates the started mission — the offline catch-up passes the
+// finish time of the mission that freed the cats, so queued work chains through a long gap
+// instead of all starting at wake-up time.
+function tickMissionQueue(anchorTs) {
   const q = gameState.missionQueue || [];
   if (!q.length) return;
   while (q.length) {
@@ -2411,7 +2587,7 @@ function tickMissionQueue() {
     if (!allIdle) break; // head is waiting; everything behind it waits too
     q.shift();
     const r = startMission(head.catIds, head.neighborhoodId, head.tier, head.searchForStrays,
-      { autoRepeat: head.autoRepeat, catAbilities: head.catAbilities });
+      { autoRepeat: head.autoRepeat, catAbilities: head.catAbilities, startedAt: anchorTs });
     if (!r.ok) {
       // Something broke (cat retired mid-wait, etc). Log and keep going.
       logEvent(`Queued mission couldn't start: ${r.reason}`);
@@ -2496,6 +2672,10 @@ function buyClubPerk(perkId) {
 function checkFirstNapNudge() {
   if ((gameState?.prestigeCount || 0) >= 1) return;
   if (gameState?.achievementFlags?.firstNapNudged) return;
+  // Wait for the T5 wall — the natural stall point where new players don't realize prestige is
+  // the way forward (T6+ is gated behind Club Level / prestige). Nudging earlier risks pushing
+  // a fresh player to nap at T2 for scraps.
+  if ((gameState?.highestTier || 0) < 5) return;
   const preview = nineLivesPreview();
   if (preview < 5) return;
   gameState.achievementFlags = gameState.achievementFlags || {};
@@ -2539,8 +2719,12 @@ function toRoman(n) {
 
 // Live preview of the Nine Lives that would be earned by ascending now.
 function nineLivesPreview() {
-  const base      = Math.floor((gameState.cumulativeGold || 0) / 5000);
-  const tierBonus = 2 * Math.max(0, (gameState.highestTier || 0) - 4);
+  // Sub-linear in run gold (sqrt) so a monster run can't buy the whole Eternal tree in one nap,
+  // while an early T5 nap still returns a satisfying ~8-13 (not ~5). Plus a depth bonus that
+  // rewards reaching deeper tiers — the "push one tier further for a bigger payout" prestige pull.
+  const gold      = Math.max(0, gameState.cumulativeGold || 0);
+  const base      = Math.floor(Math.sqrt(gold) / 12);
+  const tierBonus = 3 * Math.max(0, (gameState.highestTier || 0) - 4);
   return base + tierBonus;
 }
 
@@ -2614,7 +2798,9 @@ function prestige(keepCatIdOrIds) {
     bestiaryRewards:  gameState.bestiaryRewards,
     // Onboarding flags persist across prestige — a Cat Nap shouldn't re-show the tutorial.
     tutorialSeen:     gameState.tutorialSeen,
+    lastSeenVersion:  gameState.lastSeenVersion,
     uiAutoOpened:     gameState.uiAutoOpened,
+    uiPanelOpen:      gameState.uiPanelOpen,
     // Cat Bonds carry forward so kept-cat pairs retain their history.
     catBonds:         gameState.catBonds,
     // Patron is a meta-faction commitment; it persists across every prestige.
@@ -2678,6 +2864,9 @@ function eternalLootPct()   { return    ((gameState?.eternalPerks?.luckyWhiskers
 function eternalStrayPct()  { return    ((gameState?.eternalPerks?.openDoor      || 0) * 0.02); }
 function eternalBigHeart()  { return    (gameState?.eternalPerks?.bigHeart       || 0); }
 function eternalWarmHearth(){ return    (gameState?.eternalPerks?.warmHearth     || 0); }
+// Ninth Life — the uncapped prestige sink. +2% gold & XP per level, compounding forever, so
+// Nine Lives always has somewhere to go once the finite Eternal tree is bought out.
+function eternalNinthMul()  { return Math.pow(1.02, gameState?.eternalPerks?.ninthLife || 0); }
 
 // --- Tick ----------------------------------------------------------------
 
@@ -2705,19 +2894,104 @@ function tick() {
   const researched = tickResearch(now);
   // Advance the mission queue — starts any queued mission whose party is fully idle.
   tickMissionQueue();
+  // Ambient Golden Mouse on a wall-clock cadence (live play only).
+  maybeAmbientGoldenMouse(now);
   gameState.lastTick = now;
   // Expose both so main.js can decide whether to re-render.
   resolved._research = researched;
   return resolved;
 }
 
+// Offline resolution: like tick(), but LOOPS mission resolution so auto-repeat chains credit
+// their full offline throughput (a 60s auto-repeat over 8h resolves ~480x, not once — see the
+// finish-time anchoring in resolveMission). Runs at a capped `now` and aggregates into a
+// summary (raw per-mission entries would be a multi-MB array over a long gap).
+function offlineTick(now, openSlots) {
+  refreshStarSign();
+  const s = { count: 0, gold: 0, fishes: 0, treaties: 0, loot: 0, xp: 0, sample: [], strays: [] };
+  const SAMPLE_CAP = 40;
+  let guard = 200000; // backstop; each resolve advances virtual time by >= one mission duration
+  while (guard-- > 0) {
+    const due = gameState.missions
+      .filter(m => (m.startedAt + m.durationMs) <= now)
+      .sort((a, b) => (a.startedAt + a.durationMs) - (b.startedAt + b.durationMs));
+    if (!due.length) break;
+    let latestFinish = 0;
+    for (const m of due) {
+      latestFinish = Math.max(latestFinish, m.startedAt + m.durationMs);
+      const r = resolveMission(m); // auto-repeat relaunches anchored at finish time -> chains
+      if (!r) continue;
+      s.count++;
+      s.gold     += r.gold     || 0;
+      s.fishes   += r.fishes   || 0;
+      s.treaties += r.treaties || 0;
+      s.loot     += r.items.length;
+      s.xp       += r.xp       || 0;
+      // Cap offline stray offers to the club's open slots so wake-up isn't a wall of modals.
+      if (r.strayOffer && s.strays.length < openSlots) s.strays.push(r.strayOffer);
+      s.sample.push(r);
+      if (s.sample.length > SAMPLE_CAP) s.sample.shift(); // keep the most recent for the modal
+    }
+    // Queued missions chain through the gap too: start the next entry anchored at the finish
+    // time that freed its cats, so it resolves in a later iteration of this loop.
+    if (latestFinish) tickMissionQueue(latestFinish);
+  }
+  // Non-mission subsystems catch up once at the capped time. Each is either single-completion
+  // (research, garden) or continuous (lounge), so a single pass is correct; the unbounded ones
+  // (fishing loops internally) are re-anchored by catchUpOffline below.
+  tickFishing(now);
+  tickGarden(now);
+  tickStargazing(now);
+  tickLoungeTrickle(now);
+  s._research = tickResearch(now);
+  tickMissionQueue();
+  gameState.lastTick = now;
+  return s;
+}
+
 function catchUpOffline() {
-  const now = Date.now();
-  const elapsed = Math.max(0, now - (gameState.lastSaved || now));
-  if (elapsed <= 0) return { elapsed: 0, resolved: [] };
-  // Long Nap club perk doubles the offline catch-up window.
+  const realNow = Date.now();
+  const lastSaved = gameState.lastSaved || realNow;
+  const elapsed = Math.max(0, realNow - lastSaved);
+  if (elapsed <= 0) return { elapsed: 0, resolved: [], strays: [], totals: null };
+  // Long Nap club perk doubles the offline catch-up window. The cap now actually BINDS
+  // (it used to be cosmetic): we simulate only `clamped` of elapsed by running the catch-up
+  // at cappedNow and re-anchoring the still-running unbounded timers past the discarded gap.
   const cap = gameState?.clubPerks?.longnap ? MAX_OFFLINE_MS * 2 : MAX_OFFLINE_MS;
   const clamped = Math.min(elapsed, cap);
-  const resolved = tick();
-  return { elapsed: clamped, resolved };
+  const cappedNow = lastSaved + clamped;
+  const skip = realNow - cappedNow; // offline time discarded by the cap (0 when within cap)
+  const openSlots = Math.max(0, clubMax() - gameState.cats.length);
+
+  _suppressSaves = true; // batch: one save at the end instead of one per chained resolve
+  const s = offlineTick(cappedNow, openSlots);
+  _suppressSaves = false;
+
+  // Re-anchor still-running unbounded timers to real-now so the live loop doesn't re-credit
+  // the discarded `skip`. Only missions/fishing/lounge chain unboundedly across the gap.
+  if (skip > 0) {
+    for (const m of gameState.missions) if (m.startedAt <= cappedNow) m.startedAt += skip;
+    if (gameState.fishing?.cast && gameState.fishing.cast.startedAt <= cappedNow) {
+      gameState.fishing.cast.startedAt += skip;
+      // Keep the HOOK! window aligned with the shifted cast.
+      if (gameState.fishing.cast.biteAt) gameState.fishing.cast.biteAt += skip;
+    }
+    gameState.lastLoungeTrickle = realNow;
+  }
+  gameState.lastTick = realNow;
+
+  // Tame offline event floods: cap queued Golden Mice and drop legendary flash spam (the
+  // offline summary already reports the haul); keep a few achievement/nap flashes.
+  if ((gameState.goldenMouseQueue || []).length > 3) {
+    gameState.goldenMouseQueue = gameState.goldenMouseQueue.slice(-3);
+  }
+  gameState._flashQueue = (gameState._flashQueue || []).filter(f => f.type !== "legendary").slice(-12);
+
+  saveStateNow();
+  return {
+    elapsed: clamped,
+    resolved: s.sample,
+    strays: s.strays,
+    totals: { count: s.count, gold: s.gold, fishes: s.fishes, treaties: s.treaties, loot: s.loot, xp: s.xp }
+  };
 }

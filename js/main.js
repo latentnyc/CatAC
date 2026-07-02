@@ -20,10 +20,15 @@ function boot() {
   refreshWeeklyBoss();
 
   const summary = catchUpOffline();
-  queueStrays(summary.resolved);
+  // Offline strays are pre-capped to the club's open slots by catchUpOffline (a long auto-repeat
+  // gap could otherwise queue dozens of stray modals); queue that capped list directly.
+  for (const stray of (summary.strays || [])) uiState.strayQueue.push(stray);
 
   renderAll();
   wireEvents(onMutation);
+  // Restore the player's curated panel layout, then start persisting their toggles.
+  applySavedPanelStates();
+  wirePanelPersistence();
 
   // Modal priority: offline summary first (they have resolved rewards to see), then the
   // first-run welcome modal (brand-new save only), then any queued stray offer.
@@ -31,8 +36,17 @@ function boot() {
     openOfflineModal(summary);
   } else if (!gameState.tutorialSeen) {
     openWelcomeModal();
+  } else if (gameState.lastSeenVersion !== BUILD_VERSION) {
+    openWhatsNewModal();
   } else {
     presentNextStray();
+  }
+
+  // Make the version chip a "What's New" button so the changelog is always reachable.
+  for (const el of document.querySelectorAll("[data-version]")) {
+    el.style.cursor = "pointer";
+    el.title = "What's new — click for the changelog";
+    el.addEventListener("click", () => openWhatsNewModal());
   }
 
   let frames = 0;
@@ -47,8 +61,10 @@ function boot() {
         renderAll();
         presentQueuedFlashes();
         presentNextStray();
-        presentNextGoldenMouse();
       }
+      // Golden Mouse can also arrive on its own wall-clock schedule (no mission needed), so try
+      // to present one every tick; it no-ops when the queue is empty or a modal is already open.
+      presentNextGoldenMouse();
     }
     // Once a minute, check for daily/weekly rollover.
     if (frames % 3600 === 0) {
@@ -61,7 +77,17 @@ function boot() {
 
   window.addEventListener("beforeunload", () => saveStateNow());
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") saveStateNow();
+    if (document.visibilityState === "hidden") { saveStateNow(); return; }
+    // Refocus after a long background stretch: browsers throttle rAF to zero in hidden tabs,
+    // so the whole gap would otherwise replay through live tick() — bypassing the offline cap
+    // and every flood guard. Route real gaps through the same aggregated offline path as boot.
+    const gapMs = Date.now() - (gameState?.lastTick || Date.now());
+    if (gapMs > 5 * 60 * 1000) {
+      const summary = catchUpOffline();
+      for (const stray of (summary.strays || [])) uiState.strayQueue.push(stray);
+      renderAll();
+      if (summary.resolved.length) openOfflineModal(summary);
+    }
   });
 }
 

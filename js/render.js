@@ -181,7 +181,10 @@ function describeItemFull(item) {
   const hood = NEIGHBORHOODS[item.affinity];
   const bonus = ELEMENT_BONUS_BY_RARITY[item.rarity] || 0;
   const tagTxt = hood ? ` · ${hood.icon} ${hood.name} affinity (+${bonus} hazard mitigation on missions there)` : "";
-  return `${item.name} — ${describeBonus(item.bonus)}${tagTxt}`;
+  // Named uniques carry a catalog effect + flavor line on top of their stat bonus.
+  const def = item.uniqueId ? UNIQUE_ITEMS.find(u => u.id === item.uniqueId) : null;
+  const uniqueTxt = def ? ` · UNIQUE: ${def.effectText} · "${def.flavor}"` : "";
+  return `${item.name} — ${describeBonus(item.bonus)}${tagTxt}${uniqueTxt}`;
 }
 
 function escapeHtml(s) {
@@ -242,7 +245,15 @@ function renderTopBar() {
   const set = (id, val) => {
     const el = document.getElementById(id);
     if (!el) return;
+    // Visual juice: pop the counter when a currency goes up (no audio).
+    const prev = el.dataset.prev !== undefined ? Number(el.dataset.prev) : val;
+    el.dataset.prev = String(val);
     el.textContent = formatNumber(val);
+    if (val > prev) {
+      el.classList.remove("cur-bump");
+      void el.offsetWidth;        // reflow so the animation restarts on rapid consecutive gains
+      el.classList.add("cur-bump");
+    }
     const parent = el.parentElement;
     if (parent) {
       // Preserve the original description tooltip but append the precise number.
@@ -262,6 +273,16 @@ function renderTopBar() {
 
 function renderParty() {
   const host = $("#party-panel");
+  // Club toolbar — survives the cat-card diffing below (only .cat-card nodes are touched).
+  let toolbar = $("#club-toolbar", host);
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.id = "club-toolbar";
+    toolbar.innerHTML = `<button id="auto-gear-all" title="Run the per-cat gear optimizer on every cat not currently on a mission — roster order gets first pick.">⚙️ Auto-gear all</button>`;
+    host.prepend(toolbar);
+  }
+  const gearAllBtn = $("#auto-gear-all", toolbar);
+  if (gearAllBtn) gearAllBtn.disabled = !gameState.inventory.length || !gameState.cats.some(c => c.status !== "mission");
   const presentIds = new Set(gameState.cats.map(c => c.id));
   $$(".cat-card", host).forEach(card => {
     if (!presentIds.has(card.dataset.catId)) {
@@ -506,26 +527,38 @@ function renderTalentModal() {
   const points = cat.pendingTalentPoints || 0;
   const hasPts = points > 0;
 
-  const rows = tree.map((node, i) => {
-    const picked = !!cat.talents?.[node.id];
-    const available = !picked && i === nextIdx && hasPts;
-    const locked = !picked && i !== nextIdx;
-    const state = picked ? "picked" : available ? "available" : "locked";
-    const badge = picked ? "\u2713" : available ? "\u2605" : "\u2022";
-    return `<div class="talent-node ${state}">
-      <div class="talent-tier-num">${i + 1}</div>
-      <div class="talent-body">
-        <div class="talent-name">${badge} ${escapeHtml(node.name)}</div>
-        <div class="talent-desc muted">${escapeHtml(node.desc)}</div>
-      </div>
-      ${available ? `<button class="talent-pick-btn" data-talent-pick="${node.id}" title="${escapeHtml(node.desc)}">Pick</button>` : ""}
-    </div>`;
+  // Trees hold slots \u2014 plain nodes or {choice:[a,b]} forks. A fork renders both branches side
+  // by side; picking one greys the other out permanently ("locked-out").
+  const rows = tree.map((slot, i) => {
+    const nodes = talentSlotNodes(slot);
+    const slotPick = talentSlotPicked(cat, slot);
+    const slotAvailable = !slotPick && i === nextIdx && hasPts;
+    const isChoice = nodes.length > 1;
+    const cells = nodes.map(node => {
+      const picked = !!cat.talents?.[node.id];
+      const lockedOut = isChoice && slotPick && !picked;
+      const available = slotAvailable;
+      const state = picked ? "picked" : lockedOut ? "locked-out" : available ? "available" : "locked";
+      const badge = picked ? "\u2713" : lockedOut ? "\u2717" : available ? "\u2605" : "\u2022";
+      return `<div class="talent-node ${state}">
+        ${isChoice ? "" : `<div class="talent-tier-num">${i + 1}</div>`}
+        <div class="talent-body">
+          <div class="talent-name">${badge} ${escapeHtml(node.name)}</div>
+          <div class="talent-desc muted">${escapeHtml(node.desc)}${lockedOut ? " (path not taken)" : ""}</div>
+        </div>
+        ${available ? `<button class="talent-pick-btn" data-talent-pick="${node.id}" title="${escapeHtml(node.desc)}">Pick</button>` : ""}
+      </div>`;
+    }).join(isChoice ? `<div class="talent-choice-or">or</div>` : "");
+    return isChoice
+      ? `<div class="talent-choice-slot"><div class="talent-tier-num">${i + 1}</div><div class="talent-choice-pair">${cells}</div></div>`
+      : cells;
   }).join("");
 
+  const atChoice = nextIdx !== -1 && talentSlotNodes(tree[nextIdx]).length > 1;
   const summary = nextIdx === -1
     ? `All talents learned \u2014 ${breed.classLabel} mastery complete.`
     : hasPts
-      ? `<strong>${points}</strong> point${points > 1 ? "s" : ""} available. Pick the next talent in ${escapeHtml(breed.classLabel)}'s path.`
+      ? `<strong>${points}</strong> point${points > 1 ? "s" : ""} available. ${atChoice ? "The path forks \u2014 choose one branch; the other closes forever." : `Pick the next talent in ${escapeHtml(breed.classLabel)}'s path.`}`
       : `No points available. Earn one every 5 levels (next at level ${Math.ceil((cat.level + 1) / 5) * 5}).`;
 
   body.innerHTML = `
@@ -678,7 +711,7 @@ function renderMissions() {
           <span>Party 1\u2013${partyMax()}</span>
           <span>${formatNumber(tier.goldRange[0])}\u2013${formatNumber(tier.goldRange[1])}💰${tier.fishRange[1] ? ` · up to ${tier.fishRange[1]}🐟` : ""}${tier.treatyChance ? ` · 🎀` : ""} · ${formatNumber(tier.xpReward)} xp</span>
         </div>
-        <button class="mission-send" data-tier="${tier.tier}" ${unlocked ? "" : "disabled"} title="${unlocked ? `Open the party picker for T${tier.tier} ${hood.name}. ${formatDuration(tier.duration)} per run.` : "Locked — see requirements below the card."}">Plan</button>
+        <button class="mission-send${tier.tier === 1 && unlocked && (gameState.stats?.missionsRun || 0) === 0 && (gameState.prestigeCount || 0) === 0 && !gameState.missions.length ? " pulse-cta" : ""}" data-tier="${tier.tier}" ${unlocked ? "" : "disabled"} title="${unlocked ? `Open the party picker for T${tier.tier} ${hood.name}. ${formatDuration(tier.duration)} per run.` : "Locked — see requirements below the card."}">Plan</button>
       </div>
       ${unlockReq}`;
     host.appendChild(card);
@@ -752,12 +785,13 @@ function renderInventory() {
 
   host.innerHTML = items.map(item => {
     const hood = NEIGHBORHOODS[item.affinity];
+    const uniqueDef = item.uniqueId ? UNIQUE_ITEMS.find(u => u.id === item.uniqueId) : null;
     return `
-      <div class="inv-item rarity-${item.rarity}" data-item-id="${item.id}"
+      <div class="inv-item rarity-${item.rarity} ${item.uniqueId ? "inv-unique" : ""}" data-item-id="${item.id}"
            title="${escapeHtml(describeItemFull(item))}">
-        <div class="inv-type">${item.type} · ${hood?.icon || ""}</div>
+        <div class="inv-type">${item.type} · ${hood?.icon || ""}${item.uniqueId ? " · 🌟" : ""}</div>
         <div class="inv-name">${escapeHtml(item.name)}</div>
-        <div class="inv-bonus">${describeBonus(item.bonus)}</div>
+        <div class="inv-bonus">${describeBonus(item.bonus)}${uniqueDef ? ` <span class="inv-unique-fx">${escapeHtml(uniqueDef.effectText)}</span>` : ""}</div>
       </div>`;
   }).join("");
 }
@@ -991,9 +1025,12 @@ function renderStars() {
   }
 
   const pips = STAR_SIGNS.map(s => {
-    const cls = (s.id === sign.id ? "active" : "") + (assigned ? " pickable" : "");
-    const attr = assigned ? `data-star-pick="${s.id}"` : "";
-    return `<span class="star-pip ${cls}" ${attr} title="${escapeHtml(s.name + ' — +' + STAR_CHECK_BONUS + ' ' + STAT_LABELS[s.stat])}">${s.glyph}</span>`;
+    // Special signs (Comet/Milk Moon) can't be pinned from the perch — no pick affordance.
+    const pickable = assigned && !s.special;
+    const cls = (s.id === sign.id ? "active" : "") + (pickable ? " pickable" : "") + (s.special ? " special" : "");
+    const attr = pickable ? `data-star-pick="${s.id}"` : "";
+    const tip = `${s.name} — ${starSignEffectText(s)}${s.special ? " (passes on its own — cannot be held)" : ""}`;
+    return `<span class="star-pip ${cls}" ${attr} title="${escapeHtml(tip)}">${s.glyph}</span>`;
   }).join("");
 
   host.innerHTML = `
@@ -1001,7 +1038,7 @@ function renderStars() {
     <div class="star-card">
       <div class="star-glyph">${sign.glyph}</div>
       <div class="star-info">
-        <div class="star-name">${escapeHtml(sign.name)} <span class="star-stat">\u00B7 +${STAR_CHECK_BONUS} ${STAT_LABELS[sign.stat]}</span></div>
+        <div class="star-name">${escapeHtml(sign.name)} <span class="star-stat">\u00B7 ${escapeHtml(starSignEffectText(sign))}</span></div>
         <div class="star-flavor muted">${escapeHtml(sign.flavor)}</div>
       </div>
       ${action}
@@ -1266,8 +1303,22 @@ function renderStats() {
   const bestiaryTotal = BESTIARY.reduce((sum, c) => sum + Math.min(c.count(gameState), c.total()), 0);
   const bestiaryGoal  = BESTIARY.reduce((sum, c) => sum + c.total(), 0);
 
+  // Overall completion — the completionist's headline number. Averages four major tracks:
+  // research nodes, bestiary collection, achievements claimed, and neighborhood-tier clears.
+  const achClaimed   = Object.values(gameState.achievements || {}).filter(a => a?.claimed).length;
+  const hoodTierDone = Object.keys(gameState.bestiary?.hoodTiersCleared || {}).length;
+  const hoodTierGoal = NEIGHBORHOOD_IDS.length * MISSION_TIERS.length;
+  const completionParts = [
+    RESEARCH_NODES.length ? researchDone / RESEARCH_NODES.length : 0,
+    bestiaryGoal         ? bestiaryTotal / bestiaryGoal          : 0,
+    ACHIEVEMENTS.length  ? achClaimed / ACHIEVEMENTS.length      : 0,
+    hoodTierGoal         ? hoodTierDone / hoodTierGoal           : 0
+  ];
+  const completionPct = Math.round(100 * completionParts.reduce((a, b) => a + b, 0) / completionParts.length);
+
   // Compact grid layout: label + formatted value per row.
   const rows = [
+    ["Completion",          `${completionPct}%`],
     ["Playtime",            playtime],
     ["Missions run",        formatNumber(missions)],
     ["Crit rate",           `${critRate}% (${formatNumber(crits)})`],
@@ -1570,6 +1621,8 @@ function renderEternalPerks() {
       stateBadge = `<div class="shop-state">Club cap ${gameState.eternalPerks.clubMax}/${MAX_CLUB_CAP}</div>`;
     } else if (perk.repeatable && maxLvl) {
       stateBadge = `<div class="shop-state">Lv ${level}/${maxLvl}</div>`;
+    } else if (perk.repeatable && perk.uncapped) {
+      stateBadge = `<div class="shop-state">Lv ${level}</div>`;
     } else if (owned && !perk.repeatable) {
       stateBadge = `<div class="shop-state">Unlocked</div>`;
     }
@@ -1888,18 +1941,43 @@ function renderPicker() {
   // live score with neighborhood-effect adjustment
   const selectedIds = Array.from(p.selected);
   const score = selectedIds.length ? partyScore(selectedIds, mission) : 0;
-  const summary = missionEffectsSummary(selectedIds, mission);
+  // Activated abilities that grant mission mitigation (Scrapper's Bastion) must feed the
+  // preview — the verdict promises certainty, so it has to use the same math as the resolve.
+  p.abilityActivations = p.abilityActivations || {};
+  let pendingAbilityMit = 0;
+  for (const [catId, aid] of Object.entries(p.abilityActivations)) {
+    if (!p.selected.has(catId)) continue;
+    const ability = catAbility(findCat(catId));
+    if (ability && ability.id === aid && ability.effect?.missionMit) pendingAbilityMit += ability.effect.missionMit;
+  }
+  const summary = missionEffectsSummary(selectedIds, mission, pendingAbilityMit);
   const margin = score - summary.effectiveDC;
-  const verdict = !selectedIds.length ? "pick a cat"
-    : margin >= 6 ? "likely crit"
-    : margin >= 0 ? "favored"
-    : margin >= -4 ? "risky"
-    : "doomed";
+  // Outcome is deterministic (resolveMission compares score vs effective DC — no dice):
+  // score >= DC always succeeds, margin >= 6 always crits, below DC always fails. The wording
+  // now states that certainty instead of the old probabilistic-sounding "risky"/"doomed",
+  // which fooled players into re-sending guaranteed-fail parties.
+  const verdictKey = !selectedIds.length ? "none"
+    : margin >= 6 ? "crit"
+    : margin >= 0 ? "success"
+    : "fail";
+  const verdictText = verdictKey === "none" ? "pick a cat"
+    : verdictKey === "crit" ? "will crit ★"
+    : verdictKey === "success" ? "will succeed"
+    : `will fail — need +${-margin} score`;
 
   p.abilityActivations = p.abilityActivations || {}; // { catId: abilityId }
-  const catRows = idle.map(cat => {
+  // Twist dailies (Solo Trial) can cap the party below the normal max.
+  const partyCap = mission.partyCap ? Math.min(partyMax(), mission.partyCap) : partyMax();
+  // Sort the roster by this mission's check total so the strongest candidates float to the
+  // top — with 16 cats, eyeballing every row for the two check stats was the picker's worst chore.
+  const checkTotalOf = cat => {
+    const eff = effectiveStats(cat);
+    return mission.primaryChecks.reduce((s, st) => s + eff[st], 0);
+  };
+  const idleSorted = [...idle].sort((a, b) => checkTotalOf(b) - checkTotalOf(a));
+  const catRows = idleSorted.map(cat => {
     const selected = p.selected.has(cat.id);
-    const disabled = !selected && p.selected.size >= partyMax();
+    const disabled = !selected && p.selected.size >= partyCap;
     const eff = effectiveStats(cat);
     const checkTotal = mission.primaryChecks.reduce((s, st) => s + eff[st], 0);
     const breed = CAT_BREEDS[cat.breed];
@@ -1977,7 +2055,7 @@ function renderPicker() {
     <div class="picker-hazards">
       <div class="picker-hazards-head">
         <span>Hazards @ ${hood.icon} ${hood.name}</span>
-        <span class="muted">Mitigation pool: ${summary.mitigation} / ${summary.totalSeverity}</span>
+        <span class="muted" title="Matching-affinity gear absorbs hazard severity, but can cover at most ${Math.round(HAZARD_MAX_MITIGATED_FRAC * 100)}% of it — hazards always keep a bite.">Mitigation: ${summary.mitApplied} / ${summary.totalSeverity}${summary.mitigation > summary.mitCap ? ` (capped, +${summary.mitigation - summary.mitCap} surplus)` : ""}</span>
       </div>
       ${hazardRows}
     </div>` : "";
@@ -2066,10 +2144,12 @@ function renderPicker() {
 
   body.innerHTML = `
     <h3>${hood.icon} T${p.tier} ${hood.name}</h3>
-    <p class="muted">Check: ${mission.primaryChecks.map(s => STAT_LABELS[s]).join(" / ")} · Duration ${formatDuration(mission.duration)} · Party 1\u2013${partyMax()}</p>
-    <div class="picker-scoreboard">
+    <p class="muted">Check: ${mission.primaryChecks.map(s => STAT_LABELS[s]).join(" / ")} · Duration ${formatDuration(mission.duration)} · Party 1\u2013${partyCap}${mission.partyCap ? ` <strong>(capped by ${escapeHtml(mission.modifier?.label || "modifier")})</strong>` : ""}</p>
+    ${hood.perk ? `<p class="muted hood-perk-line" title="Neighborhood perk — always active on missions here.">${hood.icon} ${escapeHtml(hood.perk.label)}</p>` : ""}
+    <div class="picker-scoreboard" title="Outcome is exact, not luck: a Party score at or above the DC always succeeds, and a margin of +6 or more always crits. Below the DC always fails. (One caveat: missions resolve under the conditions at return time — a long run that crosses midnight may come home under a different star sign.)">
+
       <span>Party score: <strong>${score}</strong> vs ${dcDisplay}<span class="muted">${rewardHint}</span></span>
-      <span class="picker-verdict verdict-${verdict.replace(/\s+/g, "-")}">${verdict}</span>
+      <span class="picker-verdict verdict-${verdictKey}">${verdictText}</span>
     </div>
     ${passivesBlock}
     ${synergyBlock}
@@ -2136,10 +2216,15 @@ function openItemAction(itemId) {
 function openOfflineModal(summary) {
   if (!summary.resolved.length) return;
   const body = $("#modal-body");
-  const totalGold    = summary.resolved.reduce((s, r) => s + (r.gold     || 0), 0);
-  const totalFish    = summary.resolved.reduce((s, r) => s + (r.fishes   || 0), 0);
-  const totalTreaty  = summary.resolved.reduce((s, r) => s + (r.treaties || 0), 0);
-  const totalLoot    = summary.resolved.reduce((s, r) => s + r.items.length, 0);
+  // Offline catch-up passes true aggregate totals (summary.resolved is only a capped sample of
+  // the most recent missions). Fall back to reducing the list for any legacy caller.
+  const t = summary.totals || {
+    count:    summary.resolved.length,
+    gold:     summary.resolved.reduce((s, r) => s + (r.gold     || 0), 0),
+    fishes:   summary.resolved.reduce((s, r) => s + (r.fishes   || 0), 0),
+    treaties: summary.resolved.reduce((s, r) => s + (r.treaties || 0), 0),
+    loot:     summary.resolved.reduce((s, r) => s + r.items.length, 0)
+  };
   const list = summary.resolved.map(r => {
     const hood = NEIGHBORHOODS[r.neighborhoodId];
     const loot = r.items.map(i => i.name).join(", ");
@@ -2156,8 +2241,8 @@ function openOfflineModal(summary) {
   }).join("");
   body.innerHTML = `
     <h3>While you were gone (${formatDuration(summary.elapsed)})\u2026</h3>
-    <p>${summary.resolved.length} missions finished. +${formatNumber(totalGold)}💰${totalFish ? `, +${formatNumber(totalFish)}🐟` : ""}${totalTreaty ? `, +${totalTreaty}🎀` : ""}, ${totalLoot} item(s).</p>
-    <ul class="offline-list">${list}</ul>
+    <p>${formatNumber(t.count)} missions finished. +${formatNumber(t.gold)}💰${t.fishes ? `, +${formatNumber(t.fishes)}🐟` : ""}${t.treaties ? `, +${formatNumber(t.treaties)}🎀` : ""}, ${formatNumber(t.loot)} item(s).</p>
+    <ul class="offline-list">${list}${t.count > summary.resolved.length ? `<li class="muted">…and ${formatNumber(t.count - summary.resolved.length)} more</li>` : ""}</ul>
     <div class="modal-actions"><button class="btn-primary" data-modal-close>Nice!</button></div>`;
   $("#modal").classList.add("open");
   // v0.4.2: stray queueing for offline-resolved missions happens in main.js boot() via
@@ -2210,7 +2295,7 @@ function openWelcomeModal() {
     <p>You run a rescue for adventuring cats. Here's the 30-second tour:</p>
     <ol class="welcome-steps">
       <li>Your starter is a <strong>Scrapper</strong> \u2014 strong in <strong>STR</strong> and <strong>CON</strong>. That matches <strong>The Park</strong>.</li>
-      <li>In the middle column, click <strong>Plan</strong> on <strong>Park T1</strong>, pick your cat, and Send.</li>
+      <li>In the middle column, click <strong>Plan</strong> on <strong>Park T1</strong>, pick your cat, and Send. A mission succeeds when your <strong>Party score meets the mission's DC</strong> — matching stats and gear raise your score.</li>
       <li>Missions run on real-time timers. Close the tab if you want \u2014 your cats keep working and the rewards wait.</li>
       <li>Gold unlocks higher tiers. Strays sometimes ask to join. Retired cats keep training the younger ones.</li>
       <li>Stuck? A <strong>Cat Nap</strong> restarts the run with a permanent bonus carried forward.</li>
@@ -2220,6 +2305,26 @@ function openWelcomeModal() {
       <button class="btn-primary" id="welcome-dismiss">Start exploring \u2192</button>
     </div>`;
   $("#modal").classList.add("open");
+}
+
+// --- What's New (changelog) modal --------------------------------------
+
+function openWhatsNewModal() {
+  const body = $("#modal-body");
+  if (!body) return;
+  const entry = (typeof NEWS !== "undefined" && NEWS[0]) ? NEWS[0] : null;
+  if (!entry) return;
+  // NEWS item strings contain trusted inline markup (<b>); render as-is (not escaped).
+  const items = entry.items.map(it => `<li>${it}</li>`).join("");
+  body.innerHTML = `
+    <h3>🆕 What's New — v${escapeHtml(entry.version)}</h3>
+    <p class="muted">${escapeHtml(entry.title)}</p>
+    <ul class="whatsnew-list">${items}</ul>
+    <div class="modal-actions"><button class="btn-primary" data-modal-close>Let's go →</button></div>`;
+  $("#modal").classList.add("open");
+  // Mark this version's changelog seen so it doesn't reappear next boot.
+  gameState.lastSeenVersion = BUILD_VERSION;
+  saveStateNow();
 }
 
 // --- Stray offer modal -------------------------------------------------
@@ -2342,6 +2447,9 @@ function showMissionToast(r) {
     <div class="toast-rewards">${parts.join(" \u00B7 ")}</div>
     ${hazardLine}`;
   host.appendChild(toast);
+  // Cap the stack: with several auto-repeating parties resolving in one tick, unbounded
+  // toasts flood past the bottom of the viewport. Oldest goes first.
+  while (host.children.length > 4) host.firstChild.remove();
   requestAnimationFrame(() => toast.classList.add("visible"));
   setTimeout(() => {
     toast.classList.remove("visible");
@@ -2396,6 +2504,32 @@ function autoOpenPanels() {
     if (!el) continue;
     el.setAttribute("open", "");
     gameState.uiAutoOpened[rule.id] = true;
+    // Record in the persisted open-state map too, so the reveal survives reloads.
+    gameState.uiPanelOpen = gameState.uiPanelOpen || {};
+    gameState.uiPanelOpen[rule.id] = true;
+  }
+}
+
+// v0.5.0: the right column's <details> panels remember their open/closed state across
+// reloads (they used to reset to collapsed every load — the top steady-state UX gripe).
+// Panels are keyed by their first class name (e.g. "fishing-details").
+function applySavedPanelStates() {
+  const saved = gameState.uiPanelOpen || {};
+  for (const el of document.querySelectorAll("details")) {
+    const key = (el.className || "").split(" ")[0];
+    if (key && (key in saved)) el.open = !!saved[key];
+  }
+}
+
+function wirePanelPersistence() {
+  for (const el of document.querySelectorAll("details")) {
+    const key = (el.className || "").split(" ")[0];
+    if (!key) continue;
+    el.addEventListener("toggle", () => {
+      gameState.uiPanelOpen = gameState.uiPanelOpen || {};
+      gameState.uiPanelOpen[key] = el.open;
+      requestSave();
+    });
   }
 }
 
@@ -2570,10 +2704,13 @@ function wireEvents(onMutation) {
       const idx = parseInt(presetLoadBtn.dataset.presetLoad, 10);
       const preset = gameState.partyPresets?.[idx];
       if (!p || !preset) return;
+      // Respect twist-daily party caps (Solo Trial) — same cap renderPicker enforces on rows.
+      const pm = p.mission || getMission(p.neighborhoodId, p.tier);
+      const pCap = pm?.partyCap ? Math.min(partyMax(), pm.partyCap) : partyMax();
       p.selected = new Set();
       for (const id of preset.catIds) {
         const c = findCat(id);
-        if (c && c.status === "idle" && p.selected.size < partyMax()) p.selected.add(id);
+        if (c && c.status === "idle" && p.selected.size < pCap) p.selected.add(id);
       }
       renderPicker();
       return;
@@ -2583,10 +2720,12 @@ function wireEvents(onMutation) {
     if (t.id === "picker-last-party") {
       const p = uiState.picker;
       if (!p) return;
+      const lm = p.mission || getMission(p.neighborhoodId, p.tier);
+      const lCap = lm?.partyCap ? Math.min(partyMax(), lm.partyCap) : partyMax();
       p.selected = new Set();
       for (const id of (gameState.lastParty || [])) {
         const c = findCat(id);
-        if (c && c.status === "idle" && p.selected.size < partyMax()) p.selected.add(id);
+        if (c && c.status === "idle" && p.selected.size < lCap) p.selected.add(id);
       }
       renderPicker();
       return;
@@ -2894,6 +3033,13 @@ function wireEvents(onMutation) {
     }
 
     // Shop: initial click — immediate purchase or open target picker.
+    const gearAllBtn = t.closest("#auto-gear-all");
+    if (gearAllBtn && !gearAllBtn.disabled) {
+      equipBestForAll();
+      onMutation();
+      return;
+    }
+
     const shopBuyBtn = t.closest("[data-shop-buy]");
     if (shopBuyBtn && !shopBuyBtn.disabled) {
       const item = SHOP_ITEMS.find(i => i.id === shopBuyBtn.dataset.shopBuy);
@@ -2906,6 +3052,9 @@ function wireEvents(onMutation) {
         if (!r.ok) alert(r.reason); else onMutation();
       } else if (item.strayBonus) {
         const r = buyStrayConsumable(item.id);
+        if (!r.ok) alert(r.reason); else onMutation();
+      } else if (item.id === "pillow") {
+        const r = buyTimeSkip();
         if (!r.ok) alert(r.reason); else onMutation();
       } else {
         openShopTargetPicker(item);

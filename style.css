@@ -1025,6 +1025,50 @@ h2 {
 .verdict-risky       { color: var(--accent); }
 .verdict-doomed      { color: var(--danger); }
 .verdict-pick-a-cat  { color: var(--text-muted); }
+/* Deterministic verdict keys (see renderPicker): outcome is exact, not probabilistic. */
+.verdict-crit    { color: #82e0a1; }
+.verdict-success { color: var(--success); }
+.verdict-fail    { color: var(--danger); }
+.verdict-none    { color: var(--text-muted); }
+
+/* Currency counter pop when a currency increases (visual juice, no audio). */
+@keyframes cur-bump { 0% { transform: scale(1); } 30% { transform: scale(1.28); color: var(--success); } 100% { transform: scale(1); } }
+.cur-bump { animation: cur-bump 0.4s ease-out; display: inline-block; }
+
+/* What's New (changelog) list */
+.whatsnew-list { margin: 8px 0 4px; padding-left: 18px; }
+.whatsnew-list li { margin: 6px 0; line-height: 1.45; }
+
+/* Talent choice slots (v0.5.0) — a fork rendered as two branches side by side. */
+.talent-choice-slot { display: flex; align-items: stretch; gap: 8px; }
+.talent-choice-slot > .talent-tier-num { align-self: center; }
+.talent-choice-pair { display: flex; flex: 1; align-items: stretch; gap: 6px; }
+.talent-choice-pair .talent-node { flex: 1; }
+.talent-choice-or { align-self: center; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+.talent-node.locked-out { opacity: 0.45; }
+.talent-node.locked-out .talent-name { text-decoration: line-through; }
+
+/* Special star signs (Comet / Milk Moon) — day-wide effects, not pinnable. */
+.star-pip.special { color: var(--accent); text-shadow: 0 0 6px currentColor; }
+
+/* Named unique legendaries — the chase items. */
+.inv-item.inv-unique { border-color: #ffd76a; box-shadow: 0 0 6px rgba(255, 215, 106, 0.35) inset; }
+.inv-unique-fx { color: #ffd76a; font-size: 11px; }
+
+/* Neighborhood identity perk line in the mission picker. */
+.hood-perk-line { font-size: 12px; }
+
+/* Club toolbar (Auto-gear all) */
+#club-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+#club-toolbar button { font-size: 12px; padding: 4px 10px; }
+#club-toolbar button:disabled { opacity: 0.5; }
+
+/* First-mission call-to-action pulse — guides a brand-new player to their first Plan click. */
+@keyframes pulse-cta {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(130, 224, 161, 0.55); }
+  50%      { box-shadow: 0 0 0 7px rgba(130, 224, 161, 0); }
+}
+.pulse-cta { animation: pulse-cta 1.6s ease-out infinite; }
 
 .picker-last-party {
   background: transparent;

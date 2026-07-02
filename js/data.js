@@ -5,11 +5,43 @@
 // Single source of truth for the version string shown in-game. The `?v=` cache-busters
 // in index.html must be bumped to match when releasing. Displayed version is stamped
 // into the DOM at boot by main.js to avoid drift.
-const BUILD_VERSION = "0.4.2";
+const BUILD_VERSION = "0.5.0";
 
 const SAVE_KEY = "catgame.v3";
 const SAVE_VERSION = 3;
 const MAX_OFFLINE_MS = 24 * 60 * 60 * 1000;
+
+// In-game changelog. Shown once per version bump (compared against gameState.lastSeenVersion)
+// and re-openable from the version chip. Newest entry first; keep items player-facing.
+const NEWS = [
+  { version: "0.5.0", title: "Depth & Identity", items: [
+    "🌟 <b>Named unique legendaries</b> — every neighborhood hides one chase item with a bespoke power (The Drowned Bell, The Sleeping Tiger's Dream…). Legendary drops in their home hood can reveal them.",
+    "🧠 <b>Talent paths now fork</b> — slot 4 of every class offers a choice of two branches. Pick one; the other closes forever.",
+    "🗺️ <b>Neighborhood identity</b> — every hood now has a mechanical perk: Bakery tips +10% gold, Rooftops routes are −8% duration, the Dreaming doubles Golden Mice…",
+    "🎵 Yowlers and Trackers finally get party synergies: <b>Wild Duet</b>, <b>Silvered Words</b>, <b>Watchful Trail</b>.",
+    "📅 <b>Twist dailies</b> — Solo Trial (one cat, 2× rewards) and Full House join the rotation.",
+    "☄️ Two special star signs — <b>The Comet</b> and <b>The Milk Moon</b> — bring day-wide effects. They can't be pinned; enjoy them while they pass.",
+    "🛏️ <b>Cat Nap Pillow</b> — a new consumable that jumps every running timer ahead 2 hours.",
+    "⚙️ <b>Auto-gear all</b> — one click re-gears the whole club. The mission picker now sorts cats by fit.",
+    "📌 The right column finally <b>remembers which panels you keep open</b> across reloads.",
+    "🌙 The Dreaming now opens at <b>Prestige 2</b> (was 3) — every nap now delivers a marquee unlock.",
+    "🏆 New capstone achievement: <b>Nine Lives Well Lived</b> (+25🌀).",
+    "⚖️ Balance: Sanctuary fails now cost a little (0.95 cap), star signs scale with your check (min +3), and the Golden Mouse's Pounce is a real gamble."
+  ] },
+  { version: "0.4.3", title: "Clarity, Idle & Balance", items: [
+    "🎯 The mission planner now tells you plainly: <b>will succeed</b>, <b>will crit ★</b>, or <b>will fail — need +N score</b>. No more guessing.",
+    "♻️ Idle fixed: auto-repeat missions now pile up completions while you're away, the way fishing already did.",
+    "🌙 The offline cap actually works now — and <b>Long Nap</b> gives you a real 48-hour window.",
+    "🌀 New endless Eternal Perk — <b>Ninth Life</b>: pour Nine Lives in forever for +2% gold & XP per level.",
+    "💤 First Cat Nap pays out more, and pushing deeper tiers is worth more (new Nine Lives curve).",
+    "⚔️ Hazards always keep a bite now — no amount of gear fully trivializes a neighborhood.",
+    "🐾 A balanced, well-rounded party now out-performs one over-geared carry with three warm bodies.",
+    "🌿 Three new Catnip Garden seeds: <b>Four-Leaf Clover</b>, <b>Valerian</b>, and <b>Silvervine</b>.",
+    "📊 The Stats panel now shows an overall <b>Completion %</b>.",
+    "🐁 The Golden Mouse now wanders by on its own schedule, not only after missions.",
+    "💰 Gold finally has a use in the Shop (Catnip Pouch, Training Tin, Element Reroll)."
+  ] }
+];
 
 const LEVEL_CAP = 25;
 const BASE_STAT_CAP = 12;
@@ -43,12 +75,21 @@ const BOND_LOOT_PCT_BONUS = 0.02;
 const GOLDEN_MOUSE_CHANCE = 0.06; // 6% per non-failed resolve (first sighting ~within ~15 missions)
 const GOLDEN_MOUSE_CHOICES = [
   { id: "chase",   label: "Chase",   desc: "Spend 3\uD83D\uDC1F for +2 rarity shift on the next mission.", cost: { fishes: 3 }, apply: () => { gameState.pendingRarityShift = (gameState.pendingRarityShift || 0) + 2; logEvent("\u{1F9C0} You chased the mouse! +2 rarity shift next mission."); } },
-  { id: "pounce",  label: "Pounce",  desc: "Spend 2\uD83C\uDF80 for +10\uD83C\uDF80 immediately (risky gamble).", cost: { treaties: 2 }, apply: () => { gameState.treaties = (gameState.treaties || 0) + 10; logEvent("\u{1F9C0} You pounced! +10\uD83C\uDF80."); } },
+  { id: "pounce",  label: "Pounce",  desc: "Spend 2\uD83C\uDF80 \u2014 60% to snatch +10\uD83C\uDF80, 40% it slips away with your treaties.", cost: { treaties: 2 }, apply: () => { if (Math.random() < 0.6) { gameState.treaties = (gameState.treaties || 0) + 10; logEvent("\u{1F9C0} You pounced! +10\uD83C\uDF80."); } else { logEvent("\u{1F9C0} The mouse slips between your paws \u2014 and your treaties go with it."); } } },
   { id: "admire",  label: "Admire",  desc: "Watch it pass. Gain +1\uD83C\uDF80 as a keepsake.", cost: {}, apply: () => { gameState.treaties = (gameState.treaties || 0) + 1; logEvent("\u{1F9C0} The mouse glitters and is gone. +1\uD83C\uDF80."); } }
 ];
 
 // Each equipped item with a matching-element tag adds this to the mission success score.
 const ELEMENT_BONUS_BY_RARITY = { common: 1, rare: 1, epic: 2, legendary: 3 };
+
+// Matching-affinity gear can negate at most this fraction of a mission's total hazard severity;
+// the remainder is a persistent "tax" so hazards are never a pure on/off switch (over-geared =
+// fully negated wall of trivial, un-geared = an impossible wall). See missionEffectsSummary.
+const HAZARD_MAX_MITIGATED_FRAC = 0.75;
+
+// Party score = the best cat's check stat + this fraction of each other party member's. Higher
+// makes a balanced, well-rounded party competitive with a single over-geared "carry + filler".
+const PARTY_SUPPORT_COEFF = 0.35;
 
 const STATS = ["str", "dex", "con", "int", "wis", "cha"];
 const STAT_LABELS = {
@@ -72,6 +113,40 @@ const STAT_SUFFIXES = {
   wis: ["of Perception", "of the Owl", "of the Moon"],
   cha: ["of Charm", "of the Courtier", "of Silken Purrs"]
 };
+
+// ---------------------------------------------------------------------------
+// Named unique legendaries — one chase item per neighborhood. Dropped by rollLoot when a
+// legendary lands in the unique's home hood (UNIQUE_DROP_CHANCE, never while already owned).
+// `effect` fields feed partyBonuses when the item is equipped on a party cat; effects are
+// looked up from this catalog by uniqueId at read time so rebalances hit existing saves.
+// ---------------------------------------------------------------------------
+const UNIQUE_DROP_CHANCE = 0.25;
+const UNIQUE_ITEMS = [
+  { id: "oakfathersBell",   name: "The Oakfather's Bell",       type: "collar", hood: "park",
+    flavor: "The old oak remembers every cat that ever climbed it.",
+    bonus: { con: 6, str: 3 }, effect: { mit: 2, xpPct: 0.05 },
+    effectText: "+2 mitigation, +5% XP" },
+  { id: "drownedBell",      name: "The Drowned Bell",           type: "relic",  hood: "lake",
+    flavor: "It rings once a year, from underneath.",
+    bonus: { wis: 6, int: 3 }, effect: { rarityShift: 2, fishPct: 0.15 },
+    effectText: "+2 rarity shift, +15% fish" },
+  { id: "nightWindVane",    name: "Vane of the Night Wind",     type: "toy",    hood: "rooftops",
+    flavor: "It always points where the owls aren't.",
+    bonus: { dex: 6, cha: 3 }, effect: { speedPct: 0.08 },
+    effectText: "−8% mission duration" },
+  { id: "headCooksLadle",   name: "The Head Cook's Ladle",      type: "toy",    hood: "bakery",
+    flavor: "Stolen. Absolutely stolen. Worth it.",
+    bonus: { str: 6, dex: 3 }, effect: { goldPct: 0.10 },
+    effectText: "+10% gold" },
+  { id: "thirdRailWhisker", name: "Third-Rail Whisker",         type: "collar", hood: "subway",
+    flavor: "It hums with borrowed thunder.",
+    bonus: { dex: 6, con: 3 }, effect: { scoreBonus: 4 },
+    effectText: "+4 party score" },
+  { id: "tigersDream",      name: "The Sleeping Tiger's Dream", type: "treat",  hood: "dreaming",
+    flavor: "Do not wake her. Borrow her dream instead.",
+    bonus: { wis: 6, cha: 3 }, effect: { rarityShift: 2, scoreBonus: 2 },
+    effectText: "+2 rarity shift, +2 party score" }
+];
 
 const ITEM_TYPES = {
   collar: ["Collar", "Choker", "Bell"],
@@ -155,6 +230,8 @@ const NEIGHBORHOODS = {
     color: "#6fb86b",
     primaryChecks: ["str", "con"],
     flavor: "Shady oaks, bold squirrels, muddy paws.",
+    // v0.5.0 hood identity perk — a mechanical signature per neighborhood, read via hoodPerk().
+    perk: { label: "Friendly turf: +3% stray-offer chance here", strayPct: 0.03 },
     effects: [
       { id: "muddy",     name: "Muddy Paws",          severity: 3,  desc: "Progress slows in the wet grass." },
       { id: "squirrels", name: "Bold Squirrels",      severity: 4,  desc: "They dart out at the worst moments." },
@@ -168,6 +245,7 @@ const NEIGHBORHOODS = {
     color: "#57a8d3",
     primaryChecks: ["int", "wis"],
     flavor: "Quiet docks, koi drifting in lantern light.",
+    perk: { label: "Rich waters: +20% fish here", fishMul: 1.2 },
     effects: [
       { id: "chill",    name: "Chilly Water",     severity: 3,  desc: "Wet paws; slower reactions." },
       { id: "slippery", name: "Slippery Docks",   severity: 4,  desc: "One misstep and you're swimming." },
@@ -181,6 +259,7 @@ const NEIGHBORHOODS = {
     color: "#b89ce8",
     primaryChecks: ["dex", "cha"],
     flavor: "Starlight, chimney pots, daring leaps.",
+    perk: { label: "Fast routes over the chimneys: −8% mission duration here", durationMul: 0.92 },
     effects: [
       { id: "gusts",    name: "Gusty Winds",    severity: 3,  desc: "A sudden gust unbalances a leap." },
       { id: "slanted",  name: "Slanted Tiles",  severity: 4,  desc: "Footing is rarely flat." },
@@ -194,6 +273,7 @@ const NEIGHBORHOODS = {
     color: "#e89660",
     primaryChecks: ["str", "dex"],
     flavor: "Warm ovens, tempting scraps, bold mice.",
+    perk: { label: "Tips from the counter: +10% gold here", goldMul: 1.1 },
     effects: [
       { id: "hotfloor", name: "Hot Flagstones",  severity: 3,  desc: "Paws step quick or not at all." },
       { id: "scraps",   name: "Tempting Scraps", severity: 4,  desc: "Cats lose focus for pastries." },
@@ -207,6 +287,7 @@ const NEIGHBORHOODS = {
     color: "#8a8a9e",
     primaryChecks: ["dex", "con"],
     flavor: "Tunnels, third-rail arcs, strangers in long coats.",
+    perk: { label: "Lost & found: +1 rarity shift here", rarityShift: 1 },
     requiresPrestige: 1,
     effects: [
       { id: "tunnelwind", name: "Tunnel Wind",      severity: 3,  desc: "Hot gusts push paws off-balance." },
@@ -221,7 +302,11 @@ const NEIGHBORHOODS = {
     color: "#b890d1",
     primaryChecks: ["wis", "cha"],
     flavor: "Somewhere between the pillow and the hearth, cats travel.",
-    requiresPrestige: 3,
+    perk: { label: "Lucid learning: +10% XP, and Golden Mice love dreams (2× chance) here", xpMul: 1.1, mouseMul: 2 },
+    // v0.5.0: was 3 — P2 unlocked only T9 (a dead prestige), while P3 dumped three things at
+    // once. Dreaming at P2 gives every nap a marquee unlock: P1 Subway+T7/8, P2 Dreaming+T9,
+    // P3 Patrons+T10.
+    requiresPrestige: 2,
     effects: [
       { id: "fog",       name: "Drifting Fog",       severity: 3,  desc: "Memory of the path fades." },
       { id: "whisper",   name: "Whispering Toys",    severity: 5,  desc: "Old stuffed things remember." },
@@ -269,7 +354,10 @@ const DAILY_MODIFIERS = [
   { id: "treats",      label: "Treat Run",   desc: "+2 guaranteed treaties", bonusTreaties: 2 },
   { id: "experienced", label: "Experienced", desc: "+50% XP",       xpMul: 1.5 },
   { id: "hasty",       label: "Hasty",       desc: "-30% duration", durationMul: 0.7 },
-  { id: "lucky",       label: "Lucky",       desc: "+2 rarity shift + double loot", rarityShift: 2, lootRolls: 2 }
+  { id: "lucky",       label: "Lucky",       desc: "+2 rarity shift + double loot", rarityShift: 2, lootRolls: 2 },
+  // v0.5.0 twist dailies — rule changes, not just payout dials.
+  { id: "solo",        label: "Solo Trial",  desc: "ONE cat only — 2× gold & XP", partyCap: 1, goldMul: 2.0, xpMul: 2.0 },
+  { id: "fullhouse",   label: "Full House",  desc: "Full party required — +50% fish, +1 guaranteed treaty", requiresFullParty: true, fishMul: 1.5, bonusTreaties: 1 }
 ];
 
 // Challenge Neighborhoods — player commissions a one-shot mission with stacked modifiers.
@@ -342,7 +430,7 @@ const ETERNAL_PERKS = [
 
   // --- New in Tier 3a: repeatable % bonuses that stack into meaningful power curves ---
   { id: "gildedPaw", name: "Gilded Paw",  icon: "\u{1F4B5}",
-    desc: "+2% gold on every mission. Stacks \u00D7 5.",
+    desc: "+7% gold per mission, compounding to \u224840% at max. Stacks \u00D7 5.",
     repeatable: true, maxLevel: 5,
     level: s => s.eternalPerks.gildedPaw || 0,
     cost:  s => 2 + (s.eternalPerks.gildedPaw || 0),
@@ -350,7 +438,7 @@ const ETERNAL_PERKS = [
     available: s => (s.eternalPerks.gildedPaw || 0) < 5,
     apply: s => { s.eternalPerks.gildedPaw = (s.eternalPerks.gildedPaw || 0) + 1; } },
   { id: "scholarlyPurr", name: "Scholarly Purr", icon: "\uD83D\uDCDA",
-    desc: "+2% mission XP. Stacks \u00D7 5.",
+    desc: "+7% mission XP, compounding to \u224840% at max. Stacks \u00D7 5.",
     repeatable: true, maxLevel: 5,
     level: s => s.eternalPerks.scholarlyPurr || 0,
     cost:  s => 2 + (s.eternalPerks.scholarlyPurr || 0),
@@ -398,7 +486,17 @@ const ETERNAL_PERKS = [
     cost:  s => 3 + (s.eternalPerks.cherished || 0),
     owned: s => (s.eternalPerks.cherished || 0) >= 3,
     available: s => (s.eternalPerks.cherished || 0) < 3,
-    apply: s => { s.eternalPerks.cherished = (s.eternalPerks.cherished || 0) + 1; } }
+    apply: s => { s.eternalPerks.cherished = (s.eternalPerks.cherished || 0) + 1; } },
+
+  // --- The endless tail: an uncapped Nine Lives sink so the meta never goes inert. ---
+  { id: "ninthLife", name: "Ninth Life", icon: "🌙",
+    desc: "+2% gold & mission XP, compounding. Stacks forever — the endless nap.",
+    repeatable: true, uncapped: true,
+    level: s => s.eternalPerks.ninthLife || 0,
+    cost:  s => 5 + 2 * (s.eternalPerks.ninthLife || 0),
+    owned: () => false,
+    available: () => true,
+    apply: s => { s.eternalPerks.ninthLife = (s.eternalPerks.ninthLife || 0) + 1; } }
 ];
 
 // How many cats the player can keep on Cat Nap. Base 1, up to 4 with full Cherished Companion.
@@ -493,12 +591,9 @@ const ACHIEVEMENTS = [
     reward: { fishes: 12, note: "+12\uD83D\uDC1F" },
     check: s => Object.values(s.catBonds || {}).some(n => n >= BOND_THRESHOLD) },
   { id: "fullTalent", name: "Class Master",
-    desc: "Max every node in a cat's talent tree.",
+    desc: "Complete a cat's talent path (choice slots count with either branch).",
     reward: { treaties: 3, note: "+3\uD83C\uDF80" },
-    check: s => (s.cats || []).some(c => {
-      const tree = TALENT_TREES[c.breed] || [];
-      return tree.length > 0 && tree.every(n => c.talents?.[n.id]);
-    }) },
+    check: s => (s.cats || []).some(c => talentTreeComplete(c, TALENT_TREES[c.breed] || [])) },
   { id: "firstChallenge", name: "Boon Hunter",
     desc: "Complete a Challenge and earn a Boon.",
     reward: { nineLives: 1, note: "+1\uD83C\uDF00" },
@@ -561,14 +656,13 @@ const ACHIEVEMENTS = [
     desc: "Form 5 different Cat Bonds.",
     reward: { treaties: 3, note: "+3\uD83C\uDF80" },
     check: s => Object.values(s.catBonds || {}).filter(n => n >= BOND_THRESHOLD).length >= 5 },
-  { id: "talentMaster", name: "Class Master",
+  { id: "talentMaster", name: "Grand Master",
     desc: "Max every talent on three different cats.",
     reward: { treaties: 4, note: "+4\uD83C\uDF80" },
     check: s => {
       let count = 0;
       for (const c of (s.cats || [])) {
-        const tree = TALENT_TREES[c.breed] || [];
-        if (tree.length > 0 && tree.every(n => c.talents?.[n.id])) count++;
+        if (talentTreeComplete(c, TALENT_TREES[c.breed] || [])) count++;
       }
       return count >= 3;
     } },
@@ -590,7 +684,19 @@ const ACHIEVEMENTS = [
   { id: "shopSpree", name: "Regular Customer",
     desc: "Buy 25 consumables from the Club Shop.",
     reward: { fishes: 30, note: "+30\uD83D\uDC1F" },
-    check: s => (s.stats?.consumablesBought || 0) >= 25 }
+    check: s => (s.stats?.consumablesBought || 0) >= 25 },
+
+  // v0.5.0 capstone \u2014 the "you truly beat the content" beat. Checked like any other
+  // achievement, but its gates span every major long-horizon system.
+  { id: "nineLivesWellLived", name: "Nine Lives Well Lived",
+    desc: "Complete all Research, clear a T10 mission, and claim 30 other achievements.",
+    reward: { nineLives: 25, note: "+25\uD83C\uDF00" },
+    check: s => {
+      const researchDone = Object.keys(s.research?.completed || {}).length >= RESEARCH_NODES.length;
+      const t10 = Object.keys(s.bestiary?.hoodTiersCleared || {}).some(k => k.endsWith("-t10"));
+      const claimed = Object.values(s.achievements || {}).filter(a => a?.claimed).length;
+      return researchDone && t10 && claimed >= 30;
+    } }
 ];
 
 // Party synergies — conditional bonuses that activate when specific class combos are present.
@@ -612,13 +718,33 @@ const SYNERGIES = [
     id: "spectrum", name: "Full Spectrum", icon: "\uD83C\uDF08",
     req: c => c.fighter > 0 && c.mage > 0 && c.rogue > 0 && c.cleric > 0,
     effects: { goldPct: 0.15 },
-    desc: "One of every class present: +15% gold reward."
+    desc: "Scrapper + Mystic + Prowler + Purrist present: +15% gold reward."
   },
   {
     id: "pack",     name: "Pack Tactics",  icon: "\uD83D\uDC3E",
     req: c => Object.values(c).some(n => n >= 2),
     effects: { scoreBonus: 3 },
     desc: "2+ of the same class: +3 to party score."
+  },
+  // v0.5.0: Yowler and Tracker were locked out of every pair synergy (only fighter/mage/
+  // rogue/cleric appeared in reqs), leaving two classes with no composition identity.
+  {
+    id: "wildDuet", name: "Wild Duet", icon: "\uD83C\uDFB5",
+    req: c => c.bard > 0 && c.ranger > 0,
+    effects: { rarityShift: 2 },
+    desc: "Yowler + Tracker in the party: the hunt has a soundtrack. +2 rarity shift."
+  },
+  {
+    id: "silvered", name: "Silvered Words", icon: "\uD83E\uDE99",
+    req: c => c.bard > 0 && c.rogue > 0,
+    effects: { goldPct: 0.08 },
+    desc: "Yowler + Prowler in the party: charm opens doors, paws open lockboxes. +8% gold."
+  },
+  {
+    id: "watchfulTrail", name: "Watchful Trail", icon: "\uD83E\uDDED",
+    req: c => c.ranger > 0 && c.cleric > 0,
+    effects: { mit: 2 },
+    desc: "Tracker + Purrist in the party: someone always watches the path home. +2 mitigation."
   }
 ];
 
@@ -632,8 +758,9 @@ const ACTIVE_ABILITIES = {
     desc: "+50% loot chance on this mission.", effect: { lootMul: 1.5 } },
   rogue:   { id: "dash",        name: "Dash",         icon: "\uD83D\uDCA8",
     desc: "\u221230% mission duration.", effect: { durationMul: 0.7 } },
+  // v0.5.0: was 1.00 (fully free failure) \u2014 over-reaching should always cost a little.
   cleric:  { id: "sanctuary",   name: "Sanctuary",    icon: "\u271D\uFE0F",
-    desc: "Failure floor cap raised to 1.00 (no reward penalty on fail).", effect: { floorCapOverride: 1.0 } },
+    desc: "Failure floor cap raised to 0.95 (fails cost almost nothing).", effect: { floorCapOverride: 0.95 } },
   bard:    { id: "aria",        name: "Aria",         icon: "\uD83C\uDFB6",
     desc: "+50% XP on this mission.", effect: { xpMul: 1.5 } },
   ranger:  { id: "hunt",        name: "Hunt",         icon: "\uD83C\uDFF9",
@@ -647,54 +774,86 @@ const ACTIVE_ABILITIES = {
 //     on top of the base passive amount, per cat with the talent)
 //   - missionBonus: conditional bonus applied while this cat is in the party. Fields:
 //       mit, lootPct, speedPct, xpPct, scoreBonus, rarityShift, goldPct, fishPct,
-//       hazardReduction (flat hazard severity off), floorCapRaise (fail-floor cap delta),
-//       apexPredator (flag: +1 treaty per legendary drop).
-// Picking is linear — node N requires nodes 1..N-1 already picked.
+//       floorPct (failure-floor bonus), hazardReduction (flat hazard severity off),
+//       floorCapRaise (fail-floor cap delta), apexPredator (flag: +1 treaty per legendary drop).
+//     Any new key must ALSO be added to partyTalentTotals' initializer in game.js (it only
+//     collects keys present there) and wired into partyBonuses — see the Lullaby bug.
+// Picking is linear by SLOT — a slot must be satisfied before the next opens. v0.5.0: slot 4
+// is a CHOICE slot ({ choice: [a, b] }): picking one branch permanently locks out the other,
+// giving each class a real build decision (5 points, 6 nodes, only 5 ever pickable).
 const TALENT_POINT_LEVELS = [5, 10, 15, 20, 25];
 const TALENT_TREES = {
   fighter: [
     { id: "brace",      name: "Brace",           desc: "+1 CON base stat.",                                          stat: { stat: "con", amount: 1 } },
     { id: "bulwark2",   name: "Bulwark II",      desc: "Your Bulwark passive contributes +1 extra mitigation.",       passiveKind: { kind: "mit", amount: 1 } },
     { id: "ironpaw",    name: "Iron Paw",        desc: "+2 STR base stat.",                                          stat: { stat: "str", amount: 2 } },
-    { id: "reflective", name: "Reflective Hide", desc: "Matching-hood gear grants +1 extra mitigation on your missions.", missionBonus: { mit: 1 } },
+    { choice: [
+      { id: "reflective", name: "Reflective Hide", desc: "Matching-hood gear grants +1 extra mitigation on your missions.", missionBonus: { mit: 1 } },
+      { id: "rallyYowl",  name: "Rally Yowl",      desc: "+3 party score on your missions.",                              missionBonus: { scoreBonus: 3 } }
+    ] },
     { id: "immovable",  name: "Immovable",       desc: "Reduce hazard severity by 2 on your missions.",               missionBonus: { hazardReduction: 2 } }
   ],
   mage: [
     { id: "insight2",   name: "Insight II",      desc: "Your Insight passive contributes +2% extra loot chance.",    passiveKind: { kind: "lootPct", amount: 0.02 } },
     { id: "scholar",    name: "Scholar",         desc: "+2 INT base stat.",                                          stat: { stat: "int", amount: 2 } },
     { id: "foresight",  name: "Foresight",       desc: "+3 party score on your missions.",                           missionBonus: { scoreBonus: 3 } },
-    { id: "runic",      name: "Runic Weave",     desc: "+1 rarity shift on loot rolls from your missions.",          missionBonus: { rarityShift: 1 } },
+    { choice: [
+      { id: "runic",     name: "Runic Weave",    desc: "+1 rarity shift on loot rolls from your missions.",          missionBonus: { rarityShift: 1 } },
+      { id: "transmute", name: "Transmutation",  desc: "+8% gold on your missions.",                                 missionBonus: { goldPct: 0.08 } }
+    ] },
     { id: "arcane",     name: "Arcane Mastery",  desc: "+10% XP on your missions.",                                  missionBonus: { xpPct: 0.10 } }
   ],
   rogue: [
     { id: "quickfoot2", name: "Quickfoot II",    desc: "Your Quickfoot passive contributes -4% extra duration.",     passiveKind: { kind: "speedPct", amount: 0.04 } },
     { id: "swift",      name: "Swift",           desc: "+2 DEX base stat.",                                          stat: { stat: "dex", amount: 2 } },
     { id: "shadowstep", name: "Shadowstep",      desc: "-5% mission duration on your missions.",                      missionBonus: { speedPct: 0.05 } },
-    { id: "sleight",    name: "Sleight",         desc: "+5% loot chance on your missions.",                          missionBonus: { lootPct: 0.05 } },
+    { choice: [
+      { id: "sleight",  name: "Sleight",         desc: "+5% loot chance on your missions.",                          missionBonus: { lootPct: 0.05 } },
+      { id: "cutpurse", name: "Cutpurse",        desc: "+8% gold on your missions.",                                 missionBonus: { goldPct: 0.08 } }
+    ] },
     { id: "ghost",      name: "Ghost",           desc: "+5 party score on your missions.",                            missionBonus: { scoreBonus: 5 } }
   ],
   cleric: [
     { id: "tending2",   name: "Tending II",      desc: "Your Tending passive contributes +4% extra failure floor.",   passiveKind: { kind: "floorPct", amount: 0.04 } },
     { id: "mend",       name: "Mend",            desc: "+2 WIS base stat.",                                          stat: { stat: "wis", amount: 2 } },
     { id: "watchful",   name: "Watchful",        desc: "+1 CON base stat.",                                          stat: { stat: "con", amount: 1 } },
-    { id: "sanctuary",  name: "Sanctuary",       desc: "Failure floor cap raised to 0.95 on your missions.",          missionBonus: { floorCapRaise: 0.05 } },
+    { choice: [
+      { id: "sanctuary",  name: "Sanctuary",     desc: "Failure floor cap raised to 0.95 on your missions.",          missionBonus: { floorCapRaise: 0.05 } },
+      { id: "fieldMedic", name: "Field Tending", desc: "+2 mitigation on your missions.",                             missionBonus: { mit: 2 } }
+    ] },
     { id: "guardian",   name: "Guardian",        desc: "+3 mitigation on your missions.",                             missionBonus: { mit: 3 } }
   ],
   bard: [
     { id: "encore2",    name: "Encore II",       desc: "Your Encore passive contributes +3% extra mission XP.",      passiveKind: { kind: "xpPct", amount: 0.03 } },
     { id: "winsome",    name: "Winsome",         desc: "+2 CHA base stat.",                                          stat: { stat: "cha", amount: 2 } },
     { id: "silken",     name: "Silken Tongue",   desc: "+5% gold on your missions.",                                 missionBonus: { goldPct: 0.05 } },
-    { id: "benediction",name: "Benediction",     desc: "+5% extra XP on your missions (stacks with Encore).",         missionBonus: { xpPct: 0.05 } },
+    { choice: [
+      { id: "benediction", name: "Benediction",  desc: "+5% extra XP on your missions (stacks with Encore).",         missionBonus: { xpPct: 0.05 } },
+      { id: "lullaby",     name: "Lullaby",      desc: "+5% failure floor on your missions.",                         missionBonus: { floorPct: 0.05 } }
+    ] },
     { id: "diva",       name: "Diva",            desc: "+3 party score on your missions.",                            missionBonus: { scoreBonus: 3 } }
   ],
   ranger: [
     { id: "scout2",     name: "Scout II",        desc: "Your Scout passive contributes +2 extra rarity shift.",       passiveKind: { kind: "rarityShift", amount: 2 } },
     { id: "keenEye",    name: "Keen Eye",        desc: "+2 WIS base stat.",                                          stat: { stat: "wis", amount: 2 } },
     { id: "softStep",   name: "Soft Step",       desc: "+1 DEX base stat.",                                          stat: { stat: "dex", amount: 1 } },
-    { id: "pathfinder", name: "Pathfinder",      desc: "+10% fish reward on your missions.",                         missionBonus: { fishPct: 0.10 } },
-    { id: "apex",       name: "Apex Predator",   desc: "Each legendary drop on your missions also grants +1\uD83C\uDF80.", missionBonus: { apexPredator: true } }
+    { choice: [
+      { id: "pathfinder", name: "Pathfinder",    desc: "+10% fish reward on your missions.",                         missionBonus: { fishPct: 0.10 } },
+      { id: "falconer",   name: "Falconer's Eye",desc: "+2 rarity shift on loot rolls from your missions.",          missionBonus: { rarityShift: 2 } }
+    ] },
+    { id: "apex",       name: "Apex Predator",   desc: "Each legendary drop on your missions also grants +1🎀.", missionBonus: { apexPredator: true } }
   ]
 };
+
+// Slot helpers — a tree entry is either a node or { choice: [a, b] }. Used by game logic,
+// render, and the two talent achievements, so they live here in data.js (loaded first).
+function talentSlotNodes(slot) { return slot.choice ? slot.choice : [slot]; }
+function talentSlotPicked(cat, slot) {
+  return talentSlotNodes(slot).find(n => cat.talents?.[n.id]) || null;
+}
+function talentTreeComplete(cat, tree) {
+  return tree.length > 0 && tree.every(slot => !!talentSlotPicked(cat, slot));
+}
 
 // Research Tree — passive progression paid with 🐟 + real time. Each node takes a duration,
 // costs resources, and grants a permanent effect on completion. Only ONE node researches at
@@ -944,6 +1103,33 @@ const GARDEN_SEEDS = [
       { weight: 15, kind: "rarityShift", amount: 2,    note: "Mystical catnip: +2 rarity shift on next mission." }
     ]
   },
+  { id: "clover", name: "Four-Leaf Clover", icon: "🍀",
+    cost: { fishes: 2 },
+    growMs: 5 * 60 * 1000,
+    yields: [
+      { weight: 60, kind: "fishes",      amount: 3, note: "A quick handful of leaves: +3🐟." },
+      { weight: 30, kind: "fishes",      amount: 7, note: "A generous sprig: +7🐟." },
+      { weight: 10, kind: "rarityShift", amount: 1, note: "A lucky clover: +1 rarity shift on next mission." }
+    ]
+  },
+  { id: "valerian", name: "Valerian", icon: "🌸",
+    cost: { fishes: 5 },
+    growMs: 20 * 60 * 1000,
+    yields: [
+      { weight: 50, kind: "rarityShift", amount: 2,    note: "Dreamer's bloom: +2 rarity shift on next mission." },
+      { weight: 30, kind: "fishes",      amount: 12,   note: "Fragrant roots: +12🐟." },
+      { weight: 20, kind: "strayBonus",  amount: 0.35, note: "A soothing scent draws visitors: +35% stray chance." }
+    ]
+  },
+  { id: "silvervine", name: "Silvervine", icon: "🌿",
+    cost: { fishes: 8 },
+    growMs: 45 * 60 * 1000,
+    yields: [
+      { weight: 55, kind: "clubXp",      amount: 120,  note: "The club studies the vine: +120 Club XP." },
+      { weight: 30, kind: "strayBonus",  amount: 0.5,  note: "Irresistible to strays: +50% stray chance." },
+      { weight: 15, kind: "rarityShift", amount: 2,    note: "Potent essence: +2 rarity shift on next mission." }
+    ]
+  },
   { id: "moonflower", name: "Moonflower", icon: "\uD83C\uDF3C",
     cost: { treaties: 1 },
     requiresPrestige: 1,
@@ -965,8 +1151,23 @@ const STAR_SIGNS = [
   { id: "oak",      name: "The Oak",      glyph: "\u2234", stat: "con", flavor: "Endurance roots deep under the Oak." },
   { id: "scholar",  name: "The Scholar",  glyph: "\u263C", stat: "int", flavor: "Mind sharpens under the Scholar." },
   { id: "owl",      name: "The Owl",      glyph: "\u263D", stat: "wis", flavor: "Insight opens under the Owl." },
-  { id: "courtier", name: "The Courtier", glyph: "\u2698", stat: "cha", flavor: "Presence bright under the Courtier." }
+  { id: "courtier", name: "The Courtier", glyph: "\u2698", stat: "cha", flavor: "Presence bright under the Courtier." },
+  // v0.5.0 special signs \u2014 day-wide run effects instead of a stat check bonus. Not pinnable
+  // via the Stargazing perch (setStarSign rejects them) so they stay rare-day treats.
+  { id: "comet",    name: "The Comet",    glyph: "\u2604", special: { rarityShift: 2 }, flavor: "Rare things fall while the Comet burns." },
+  { id: "milkmoon", name: "The Milk Moon", glyph: "\u25cb", special: { xpMul: 1.10 },    flavor: "All cats dream sweeter under the Milk Moon." }
 ];
+
+// Human-readable effect line for a sign \u2014 handles both stat signs and special signs.
+function starSignEffectText(sign) {
+  if (!sign) return "";
+  if (sign.stat) return `+${STAR_CHECK_BONUS} (or +10%) ${STAT_LABELS[sign.stat]} on checks`;
+  const fx = sign.special || {};
+  const parts = [];
+  if (fx.rarityShift) parts.push(`+${fx.rarityShift} rarity shift on all missions`);
+  if (fx.xpMul) parts.push(`+${Math.round((fx.xpMul - 1) * 100)}% XP on all missions`);
+  return parts.join(", ") || "a strange night";
+}
 const STAR_CHECK_BONUS = 3;  // added to the matching stat check during partyScore
 const STAR_REROLL_COST = { treaties: 2 };
 
@@ -975,13 +1176,13 @@ const SHOP_ITEMS = [
     cost: { gold: 500 }, oneTime: true,
     desc: "Common drops auto-convert to 10\uD83D\uDCB0 instead of filling inventory." },
   { id: "training",  name: "Training Tin",       icon: "\uD83E\uDD6B",
-    cost: { fishes: 10 }, target: "cat",
+    cost: { gold: 400 }, target: "cat",
     desc: "+500 xp to a chosen cat." },
   { id: "reroll",    name: "Element Reroll",     icon: "\uD83C\uDFB2",
-    cost: { fishes: 15 }, target: "item",
+    cost: { gold: 500 }, target: "item",
     desc: "Reroll the element tag on a chosen item." },
   { id: "catnip",    name: "Catnip Pouch",       icon: "\uD83C\uDF3F",
-    cost: { fishes: 4 }, stackable: true, consumable: true, strayBonus: 0.25,
+    cost: { gold: 150 }, stackable: true, consumable: true, strayBonus: 0.25,
     desc: "+25% stray-offer chance on your next search. Carries over across missions until a stray appears." },
   { id: "tuna",      name: "Tuna Lure",          icon: "\uD83C\uDF63",
     cost: { fishes: 10 }, stackable: true, consumable: true, strayBonus: 0.50,
@@ -989,6 +1190,9 @@ const SHOP_ITEMS = [
   { id: "summons",   name: "Stray Summons",      icon: "\uD83C\uDFAB",
     cost: { treaties: 3 }, stackable: true, consumable: true,
     desc: "Single-use. Your next mission is guaranteed to offer a stray." },
+  { id: "pillow",    name: "Cat Nap Pillow",     icon: "\u{1F6CF}\uFE0F",
+    cost: { treaties: 3 }, instant: true,
+    desc: "The whole club naps: every running timer (missions, fishing, garden, research) jumps ahead 2 hours." },
   { id: "tonic",     name: "Stat Tonic",         icon: "\uD83D\uDC8E",
     cost: { treaties: 8 }, target: "cat",
     desc: "+1 to any one stat on a chosen cat (up to base cap 12)." },

@@ -76,6 +76,12 @@ function freshRunShell(persistents, starter, initialGold) {
     // First-run onboarding: welcome modal shows once, auto-opened panels stay remembered.
     tutorialSeen:     persistents.tutorialSeen     || false,
     uiAutoOpened:     persistents.uiAutoOpened     || {},
+    // Manual open/closed state of the right-column <details> panels, keyed by panel class.
+    uiPanelOpen:      persistents.uiPanelOpen      || {},
+    // What's New: the last BUILD_VERSION whose changelog the player has seen. null => show it.
+    lastSeenVersion:  persistents.lastSeenVersion  || null,
+    // Ambient Golden Mouse next-spawn timestamp (run-state; lazily set by the tick).
+    nextAmbientMouseAt: null,
     log: []
   };
 }
@@ -84,6 +90,8 @@ function newGame() {
   const now = Date.now();
   const starter = rollCat("fighter");
   const state = freshRunShell({}, starter, 0);
+  // A brand-new player doesn't need a changelog for a version they never played.
+  state.lastSeenVersion = BUILD_VERSION;
   // Head Start perk bonus is applied via starter gold when coming from a prestige.
   // Seed the bestiary with the starter breed so it shows up right away.
   state.bestiary.breedsSeen[starter.breed] = 1;
@@ -178,6 +186,11 @@ function loadState() {
     if (!Array.isArray(parsed.missionQueue)) parsed.missionQueue = [];
     if (typeof parsed.tutorialSeen !== "boolean") parsed.tutorialSeen = false;
     parsed.uiAutoOpened = parsed.uiAutoOpened || {};
+    // Existing saves have no lastSeenVersion → null, so returning players see the What's New card
+    // once. nextAmbientMouseAt is lazily (re)initialized by the tick, so a stale value is harmless.
+    if (typeof parsed.lastSeenVersion === "undefined") parsed.lastSeenVersion = null;
+    if (typeof parsed.nextAmbientMouseAt === "undefined") parsed.nextAmbientMouseAt = null;
+    parsed.uiPanelOpen = parsed.uiPanelOpen || {};
 
     // Defensive: reconcile cat.station and station.assignedCatId. The station's
     // assignedCatId is the source of truth; cat.station / cat.status are derived.
@@ -227,10 +240,13 @@ function loadState() {
 // Skip flag used by "Start Fresh" so the beforeunload listener doesn't resurrect the save
 // we just deleted. Also short-circuits the debounced saver.
 let _saveSuspended = false;
+// Batch guard: set true around offline catch-up so thousands of chained mission resolves
+// don't each hit localStorage. catchUpOffline() flushes once when it clears this.
+let _suppressSaves = false;
 function suspendSaves() { _saveSuspended = true; if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } }
 
 function saveStateNow() {
-  if (!gameState || _saveSuspended) return;
+  if (!gameState || _saveSuspended || _suppressSaves) return;
   gameState.lastSaved = Date.now();
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
@@ -241,7 +257,7 @@ function saveStateNow() {
 }
 
 function requestSave() {
-  if (saveTimer || _saveSuspended) return;
+  if (saveTimer || _saveSuspended || _suppressSaves) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
     saveStateNow();

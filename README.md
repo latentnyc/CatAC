@@ -2,7 +2,7 @@
 
 A semi-idle browser game about adventuring cats. Send your cats on timed expeditions across themed neighborhoods, loot gear, level them up, and prestige via the "Cat Nap" ascension loop. Vanilla HTML/CSS/JS — no build step, no framework.
 
-**Status:** `v0.4.2` — shared with friends for feedback.
+**Status:** `v0.5.0` — shared with friends for feedback.
 
 ## ▶️ Play now
 
@@ -15,10 +15,10 @@ A brief first-run tutorial covers the basics. Panels on the right unfold as you 
 ## What's in it
 
 ### Core loop
-- **6 cat classes** with unique passives, 5-node talent trees, and one active ability each (Scrapper, Mystic, Prowler, Purrist, Yowler, Tracker)
-- **6 neighborhoods** with elemental themes and environmental hazards: Park, Lake, Rooftops, Bakery, Subway (prestige 1), and The Dreaming (prestige 3)
+- **6 cat classes** with unique passives, branching talent paths (slot 4 forks — pick a branch, the other closes), and one active ability each (Scrapper, Mystic, Prowler, Purrist, Yowler, Tracker)
+- **6 neighborhoods** with elemental themes, environmental hazards, and a mechanical identity perk each: Park, Lake, Rooftops, Bakery, Subway (prestige 1), and The Dreaming (prestige 2)
 - **10 mission tiers** gated by gold → club level → achievements → prestige
-- **Gear system** — 4 slots × 4 rarities with elemental-affinity mitigation and 2/4-piece set bonuses
+- **Gear system** — 4 slots × 4 rarities with elemental-affinity mitigation, 2/4-piece set bonuses, and a **named unique legendary** hiding in every neighborhood
 
 ### Stations (per-neighborhood idle mechanics)
 - **🎣 Fishing Hole** — cast, wait, HOOK! a WoW-style bite window for active-play bonus catches
@@ -29,7 +29,7 @@ Each station can have one cat assigned for passive XP + stat-scaled bonuses.
 
 ### Meta-progression
 - **Cat Nap prestige** with multi-Veteran stable (up to 4 kept cats per nap via the Cherished Companion Eternal Perk)
-- **13 Eternal Perks** bought with 🌀 Nine Lives, persistent across every run
+- **14 Eternal Perks** bought with 🌀 Nine Lives, persistent across every run — including **Ninth Life**, an uncapped perk you can pour Nine Lives into forever
 - **🎭 Patrons** — three meta-factions at prestige 3 that reshape your run's playstyle (Baker / Librarian / Night Market)
 - **📚 Research tree** — 15 nodes across 4 tiers, real-time passive progression (unlocks at Club Level 5)
 - **⚔️ Challenges** — opt-in restrictions (mono-class, no-gear, pair-bond, home-body) that stack permanent Boons
